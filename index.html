@@ -9,7 +9,7 @@
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
 
-    <!-- Font Awesome for Icons -->
+    <!-- Font Awesome for Icons (Adicionado ícone do Google) -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
 
     <!-- Bibliotecas para Leitura de Arquivos -->
@@ -102,7 +102,10 @@
             signInWithEmailAndPassword, 
             onAuthStateChanged, 
             signOut,
-            updatePassword 
+            updatePassword,
+            // NOVOS IMPORTS DO GOOGLE AUTH
+            GoogleAuthProvider,
+            signInWithPopup
         } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { 
             getFirestore, 
@@ -116,7 +119,10 @@
             collection, 
             query, 
             writeBatch,
-            setLogLevel
+            setLogLevel,
+            // NOVOS IMPORTS
+            getDocs, 
+            where
         } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // --- Configuração e Variáveis Globais do Firebase ---
@@ -145,6 +151,8 @@
         let currentCadastroTab = 'radio';
         let currentSettingTab = 'my-profile'; 
         let isLoggingIn = false;
+        // NOVO: Armazena usuários aguardando aprovação
+        let pendingUsers = [];
 
         // Paginação e Busca
         let radioPage = 1, equipamentoPage = 1, geralPage = 1;
@@ -215,7 +223,9 @@
             const collectionsToSync = {
                 'radios': (data) => dbRadios = data,
                 'equipamentos': (data) => dbEquipamentos = data,
-                'registros': (data) => dbRegistros = data
+                'registros': (data) => dbRegistros = data,
+                // NOVO: Coleção de usuários pendentes (visível para todos, mas usado apenas pelo admin)
+                'pending_approvals': (data) => pendingUsers = data, 
             };
 
             Object.keys(collectionsToSync).forEach(colName => {
@@ -458,7 +468,7 @@
             }
         }
         
-        // --- NOVO: Funções de CRUD de Usuário ---
+        // --- Funções de CRUD de Usuário ---
 
         function loadUserForEdit(id) {
             const user = settings.users.find(u => u.id === id);
@@ -584,6 +594,143 @@
                 showModal('Erro', 'Não foi possível excluir o perfil no banco de dados.', 'error');
             }
         }
+
+        // --- Funções de Gerenciamento de Pendências (Novo) ---
+
+        async function approveUser(pendingId, name, email) {
+            if (!db || !appId || currentUser.role !== 'admin') {
+                showModal('Acesso Negado', 'Você não tem permissão para aprovar usuários.', 'error');
+                return;
+            }
+
+            const usersFromDB = settings.users;
+            
+            // 1. Adicionar usuário na lista de usuários do sistema (settings.users)
+            const newUser = { 
+                id: crypto.randomUUID(), // Novo ID único
+                name, 
+                username: email, 
+                role: 'user', // Começa como usuário padrão
+                permissions: { dashboard: true, cadastro: true, pesquisa: true, settings: false } // Permissões padrão
+            };
+            usersFromDB.push(newUser);
+
+            // 2. Remover da lista de pendências (pending_approvals)
+            // [CORREÇÃO] Usa appId hardcoded
+            const pendingDocRef = doc(db, `artifacts/${appId}/public/data/pending_approvals`, pendingId);
+
+            try {
+                // Usa batch para garantir atomicidade das operações
+                const batch = writeBatch(db);
+                
+                // 2a. Remover pendência
+                batch.delete(pendingDocRef);
+
+                // 2b. Salvar nova lista de usuários
+                const settingsDocRef = doc(db, "artifacts", appId, "public", "data", "settings", "config");
+                batch.update(settingsDocRef, { users: usersFromDB });
+                
+                await batch.commit();
+
+                // 3. Notificar sucesso e fechar modal
+                hideModal();
+                showModal('Usuário Aprovado', `O usuário <b>${name}</b> (${email}) foi aprovado como 'Usuário Padrão'. Ele pode logar agora.`, 'success');
+                renderApp(); 
+                
+            } catch (e) {
+                console.error("Erro ao aprovar usuário:", e);
+                showModal('Erro', 'Não foi possível aprovar o usuário.', 'error');
+            }
+        }
+
+        async function rejectUser(pendingId, name) {
+            if (!db || !appId || currentUser.role !== 'admin') {
+                showModal('Acesso Negado', 'Você não tem permissão para negar usuários.', 'error');
+                return;
+            }
+
+            // 1. Remover da lista de pendências (pending_approvals)
+            // [CORREÇÃO] Usa appId hardcoded
+            const pendingDocRef = doc(db, `artifacts/${appId}/public/data/pending_approvals`, pendingId);
+            
+            try {
+                await deleteDoc(pendingDocRef);
+
+                // 2. Notificar sucesso e fechar modal
+                hideModal();
+                showModal('Usuário Negado', `O acesso de <b>${name}</b> foi negado e removido da lista de pendências.`, 'warning');
+                renderApp(); 
+                
+            } catch (e) {
+                console.error("Erro ao negar usuário:", e);
+                showModal('Erro', 'Não foi possível negar o acesso.', 'error');
+            }
+        }
+        
+        function renderPendingApprovalsModal() {
+            if (currentUser.role !== 'admin') {
+                showModal('Acesso Negado', 'Apenas administradores podem visualizar as solicitações de acesso.', 'error');
+                return;
+            }
+
+            const pendingListHTML = pendingUsers.length > 0 ? 
+                pendingUsers.map(u => `
+                    <div class="flex items-center justify-between p-3 border-b border-gray-100 last:border-b-0 bg-white rounded-lg shadow-sm">
+                        <div>
+                            <p class="font-semibold text-gray-800">${u.name}</p>
+                            <p class="text-xs text-gray-500">${u.email}</p>
+                            <p class="text-xs text-gray-500">Solicitado em: ${new Date(u.createdAt).toLocaleDateString()} ${new Date(u.createdAt).toLocaleTimeString()}</p>
+                        </div>
+                        <div class="flex space-x-2">
+                            <button onclick="approveUserWrapper('${u.id}', '${u.name}', '${u.email}')" class="px-3 py-1 text-xs bg-green-main text-white rounded-lg hover:bg-green-700 shadow-md transition-colors">
+                                Aprovar
+                            </button>
+                            <button onclick="rejectUserWrapper('${u.id}', '${u.name}')" class="px-3 py-1 text-xs bg-red-500 text-white rounded-lg hover:bg-red-600 shadow-md transition-colors">
+                                Negar
+                            </button>
+                        </div>
+                    </div>
+                `).join('')
+                : '<p class="text-gray-500 text-center py-4">Nenhuma solicitação de acesso pendente.</p>';
+
+            const modal = document.getElementById('global-modal');
+            const titleEl = document.getElementById('modal-title');
+            const messageEl = document.getElementById('modal-message');
+            const actionsEl = document.getElementById('modal-actions');
+
+            titleEl.textContent = `Aprovações Pendentes (${pendingUsers.length})`;
+            // Remove a classe 'max-w-sm' do modal principal para permitir mais espaço
+            modal.querySelector('div').classList.remove('max-w-sm');
+            modal.querySelector('div').classList.add('max-w-lg'); 
+            
+            messageEl.innerHTML = `
+                <p class="text-sm text-gray-600 mb-4">Novos usuários que tentaram o login com o Google aguardam sua aprovação.</p>
+                <div class="max-h-80 overflow-y-auto space-y-3 p-2 bg-gray-50 rounded-lg border border-gray-200">
+                    ${pendingListHTML}
+                </div>
+            `;
+            titleEl.className = `text-xl font-bold mb-3 ${pendingUsers.length > 0 ? 'text-yellow-600' : 'text-gray-800'}`;
+
+            actionsEl.innerHTML = `
+                <button onclick="hideModal(); document.getElementById('global-modal').querySelector('div').classList.remove('max-w-lg'); document.getElementById('global-modal').querySelector('div').classList.add('max-w-sm');" 
+                        class="px-3 py-1.5 text-sm bg-gray-200 text-gray-700 font-semibold rounded-lg hover:bg-gray-300 transition-colors shadow-md">
+                    Fechar
+                </button>
+            `;
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        // Wrappers para lidar com aspas em strings
+        window.approveUserWrapper = (id, name, email) => {
+            showConfirmModal('Confirmar Aprovação', `Deseja aprovar o acesso de <b>${name}</b>? Ele receberá permissões de 'Usuário Padrão'.`, () => approveUser(id, name, email));
+        };
+        window.rejectUserWrapper = (id, name) => {
+            showConfirmModal('Confirmar Negação', `Deseja negar o acesso de <b>${name}</b>? A solicitação será removida.`, () => rejectUser(id, name));
+        };
+        window.renderPendingApprovalsModal = renderPendingApprovalsModal;
+        
+        // --- FIM NOVAS FUNÇÕES: Gerenciamento de Pendências ---
 
         // --- NOVAS FUNÇÕES: Gerenciamento Pessoal (Meu Perfil) ---
 
@@ -775,6 +922,10 @@
             const messageEl = document.getElementById('modal-message');
             const actionsEl = document.getElementById('modal-actions');
 
+            // Volta o tamanho do modal para o padrão
+            modal.querySelector('div').classList.remove('max-w-lg');
+            modal.querySelector('div').classList.add('max-w-sm');
+
             titleEl.textContent = title;
             messageEl.innerHTML = message.replace(/\n/g, '<br>');
             
@@ -783,6 +934,7 @@
             if (type === 'success') titleClass = 'text-green-main';
             if (type === 'error') titleClass = 'text-red-600';
             if (type === 'warning') titleClass = 'text-yellow-600';
+            if (type === 'info') titleClass = 'text-blue-600'; // Adicionando cor para info
             titleEl.className = `text-xl font-bold mb-3 ${titleClass}`;
 
             actionsEl.innerHTML = `
@@ -799,6 +951,10 @@
             const titleEl = document.getElementById('modal-title');
             const messageEl = document.getElementById('modal-message');
             const actionsEl = document.getElementById('modal-actions');
+
+            // Volta o tamanho do modal para o padrão
+            modal.querySelector('div').classList.remove('max-w-lg');
+            modal.querySelector('div').classList.add('max-w-sm');
 
             titleEl.textContent = title;
             messageEl.innerHTML = message.replace(/\n/g, '<br>');
@@ -895,10 +1051,21 @@
                             
                             <!-- Usuário e Logout à Direita -->
                             <div class="flex-1 flex justify-end items-center space-x-4">
+                                
+                                <!-- NOVO: Sino de Notificação de Aprovação -->
+                                ${currentUser.role === 'admin' ? `
+                                <button onclick="renderPendingApprovalsModal()" class="relative text-gray-500 hover:text-yellow-600 transition-colors p-2 rounded-full hover:bg-gray-100" title="Novas Solicitações de Acesso">
+                                    <i class="fas fa-bell"></i>
+                                    ${pendingUsers.length > 0 ? `
+                                    <span class="absolute top-0 right-0 inline-flex items-center justify-center px-2 py-1 text-xs font-bold leading-none text-red-100 transform translate-x-1/2 -translate-y-1/2 bg-red-600 rounded-full">${pendingUsers.length}</span>
+                                    ` : ''}
+                                </button>
+                                ` : ''}
+
                                 <span class="text-sm font-medium text-gray-600 hidden sm:inline">
                                     Olá, ${currentUser.name}
                                 </span>
-                                <!-- NOVO: Botão de Perfil Pessoal -->
+                                <!-- Botão de Perfil Pessoal -->
                                 <button onclick="updateState('settingTab', 'my-profile'); updateState('page', 'settings');" class="text-gray-500 hover:text-green-main transition-colors p-1 rounded-full hover:bg-gray-100" title="Meu Perfil / Gerenciar Senha">
                                     ${getUserAvatar(currentUser)}
                                 </button>
@@ -936,7 +1103,7 @@
                             </p>
                         </div>
                         <form id="login-form" class="mt-8 space-y-6">
-                            <input type="email" id="email" placeholder="Email" required	
+                            <input type="email" id="email" placeholder="Email (Acesso Interno)" required	
                                 class="appearance-none relative block w-full px-4 py-3 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-lg focus:outline-none focus:ring-green-main focus:border-green-main focus:z-10 sm:text-sm shadow-sm"
                                 value="monitoramentocoa1986@gmail.com"
                             >
@@ -953,9 +1120,28 @@
                             <button type="submit"	
                                 class="group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-lg text-white bg-green-main hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-main transition-all shadow-md">
                                 <i class="fas fa-lock mr-2"></i>
-                                Entrar
+                                Entrar (Interno)
                             </button>
                         </form>
+                        
+                        <!-- NOVO: Separador e Botão Google -->
+                        <div class="relative py-4">
+                            <div class="absolute inset-0 flex items-center">
+                                <div class="w-full border-t border-gray-300"></div>
+                            </div>
+                            <div class="relative flex justify-center text-sm">
+                                <span class="px-2 bg-white text-gray-500">
+                                    OU
+                                </span>
+                            </div>
+                        </div>
+
+                        <button type="button" onclick="handleGoogleLogin()"	
+                            class="group relative w-full flex justify-center py-3 px-4 border border-gray-300 text-sm font-medium rounded-lg text-gray-700 bg-white hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-all shadow-md">
+                            <i class="fab fa-google mr-2 text-indigo-500"></i>
+                            Entrar com Google
+                        </button>
+                        
                         <p class="text-xs text-center text-gray-500">
                             Usina Pitangueiras - "A ENERGIA QUE MOVE A REGIÃO"
                         </p>
@@ -1000,7 +1186,7 @@
                     <path d="M12 2v6"></path>
                     <path d="M16 4h4a2 2 0 0 1 2 2v2M8 4H4a2 2 0 0 0-2 2v2"></path>
                     <path d="M20 12h2M2 12h2"></path>
-                    <path d="M18 16h4a2 2 0 0 1 2 2v2M6 16H2a2 2 0 0 0-2 2v2"></path>
+                    <path d="M18 16h4a2 2 0 0 1 2 2v2M6 16H2a2 0 0 0-2 2v2"></path>
                     <circle cx="12" cy="12" r="3" fill="#ffffff" stroke="none"></circle>
                     <path d="M12 15v7"></path>
                 </svg>
@@ -1830,7 +2016,7 @@
 
             const tableRows = usersFromDB.map(u => {
                 const isMainAdmin = u.username === 'monitoramentocoa1986@gmail.com';
-                const isCurrent = currentUser.uid === u.uid;
+                const isCurrent = currentUser.email === u.username;
                 const canEditDelete = !isMainAdmin;
 
                 return `
@@ -1972,9 +2158,79 @@
                 } else if (error.code === 'auth/operation-not-allowed') {
                     msg = 'Login por Email/Senha não está ativado no Firebase.';
                 }
-                showModal('Erro de Login', msg, 'error');
+                showModal('Erro de Login (Interno)', msg, 'error');
             }
         }
+        
+        // NOVO: Login com Google
+        async function handleGoogleLogin() {
+            if (!db || !appId) {
+                showModal('Erro', 'Conexão com o banco de dados perdida.', 'error');
+                return;
+            }
+            
+            isLoggingIn = true;
+            renderApp();	
+
+            const provider = new GoogleAuthProvider();
+            try {
+                const result = await signInWithPopup(auth, provider);
+                const user = result.user;
+                const email = user.email;
+                const name = user.displayName || 'Usuário Google';
+
+                // 1. Verificar se o usuário já existe na lista de perfis APROVADOS no Firestore
+                const appUser = await fetchAppUserProfile(email);
+
+                if (appUser) {
+                    // Usuário aprovado, o setupAuthListener cuida da continuidade.
+                    showModal('Sucesso!', `Bem-vindo de volta, ${appUser.name}!`, 'success');
+                } else {
+                    // 2. Usuário novo ou não aprovado. Precisa entrar na fila de pendências.
+                    
+                    // 2a. Checar se já está na fila de pendências
+                    // [CORREÇÃO] Usa appId hardcoded
+                    const pendingColRef = collection(db, `artifacts/${appId}/public/data/pending_approvals`);
+                    const q = query(pendingColRef, where("email", "==", email));
+                    const pendingSnap = await getDocs(q);
+                    
+                    if (pendingSnap.empty) {
+                        // 2b. Se não estiver pendente, adiciona
+                        await addDoc(pendingColRef, {
+                            email: email,
+                            name: name,
+                            createdAt: new Date().toISOString()
+                        });
+                        console.log(`Usuário ${email} adicionado à lista de pendências.`);
+                    }
+
+                    // 2c. Desloga o usuário do Firebase Auth (para que não acesse nada antes de ser aprovado)
+                    await signOut(auth);
+                    
+                    isLoggingIn = false;
+                    renderApp();
+
+                    showModal('Acesso Pendente', 
+                        `Bem-vindo, ${name}! Seu acesso foi registrado, mas precisa ser aprovado por um administrador. Tente logar novamente após a aprovação.`, 
+                        'info');
+                }
+            } catch (error) {
+                isLoggingIn = false;
+                renderApp();
+                
+                let msg = 'Ocorreu um erro desconhecido durante o login com o Google.';
+                if (error.code === 'auth/popup-closed-by-user') {
+                    msg = 'A janela de login foi fechada. Tente novamente.';
+                } else if (error.code === 'auth/cancelled-popup-request') {
+                    msg = 'O pop-up de login foi cancelado.';
+                } else if (error.code === 'auth/account-exists-with-different-credential') {
+                    msg = 'Já existe uma conta com este email, mas usando credenciais diferentes (tente email/senha).';
+                }
+                console.error("Erro no login com Google:", error.code, error.message);
+                showModal('Erro de Login Google', msg, 'error');
+            }
+        }
+
 
         async function fetchAppUserProfile(email) {
             if (!db || !appId) return null;
@@ -2021,6 +2277,7 @@
                     });
                 }
             }
+            // Não precisa de evento separado para Google, pois ele usa `onclick` diretamente.
         }
 
         function attachCadastroEvents() {
@@ -2404,6 +2661,10 @@
             const messageEl = document.getElementById('modal-message');
             const actionsEl = document.getElementById('modal-actions');
 
+            // Remove a classe 'max-w-sm' do modal principal para permitir mais espaço
+            modal.querySelector('div').classList.remove('max-w-sm');
+            modal.querySelector('div').classList.add('max-w-lg'); 
+
             titleEl.textContent = `Permissões de ${user.name}`;
             messageEl.innerHTML = `
                 <p class="text-sm text-gray-600 mb-4">Selecione as abas que este usuário pode acessar.</p>
@@ -2412,7 +2673,8 @@
             titleEl.className = `text-xl font-bold mb-3 text-gray-800`;	
 
             actionsEl.innerHTML = `
-                <button onclick="hideModal()" class="px-3 py-1.5 text-sm bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 shadow-md">Cancelar</button>
+                <button onclick="hideModal(); document.getElementById('global-modal').querySelector('div').classList.remove('max-w-lg'); document.getElementById('global-modal').querySelector('div').classList.add('max-w-sm');"
+                        class="px-3 py-1.5 text-sm bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 shadow-md">Cancelar</button>
                 <button id="confirm-action-btn" class="px-3 py-1.5 text-sm bg-green-main text-white rounded-lg hover:bg-green-700 shadow-md">Salvar</button>
             `;
             
@@ -2429,6 +2691,9 @@
                     // [CORREÇÃO] Usa appId hardcoded
                     await setDoc(settingsDocRef, { users: usersFromDB }, { merge: true });
                     hideModal();
+                    // Retorna o modal ao tamanho padrão
+                    document.getElementById('global-modal').querySelector('div').classList.remove('max-w-lg');
+                    document.getElementById('global-modal').querySelector('div').classList.add('max-w-sm');
                     showModal('Sucesso', `Permissões de ${user.name} atualizadas.`, 'success');
                     // Se estiver editando as próprias permissões, força um novo check de Auth e render
                     if (currentUser.id === userId) {
@@ -2501,15 +2766,19 @@
                     const appUser = await fetchAppUserProfile(user.email);
                     
                     if (appUser) {
+                        // Usuário aprovado no Firestore, loga no App.
                         currentUser = { ...appUser, uid: user.uid, email: user.email };
                         isAuthReady = true;
                         isLoggingIn = false;	
                         await attachFirestoreListeners();	
                     } else {
-                        showModal('Erro de Perfil', 'Login bem-sucedido, mas seu perfil (permissões) não foi encontrado no banco de dados. Contate o administrador.', 'error');
+                        // Usuário logado no Firebase Auth, mas sem perfil no Firestore (não aprovado).
+                        if (auth.currentUser) await signOut(auth); // Garante que ele é deslogado
+                        
+                        showModal('Acesso Não Autorizado', 'Seu perfil não foi encontrado ou não está autorizado. Se você fez login com Google, aguarde a aprovação do administrador.', 'error');
                         isAuthReady = true;	
                         isLoggingIn = false;
-                        await handleLogout();	
+                        updateState('page', 'login');
                     }
                 } else {
                     currentUser = null;
@@ -2518,7 +2787,9 @@
                     isLoggingIn = false;
                     detachFirestoreListeners();	
                     dbRadios = []; dbEquipamentos = []; dbRegistros = [];
-                    updateState('page', 'login');	
+                    // NÃO CHAMA updateState('page', 'login') aqui, pois ele já pode ter sido chamado
+                    // pela lógica de aprovação pendente. Apenas força a renderização.
+                    renderApp();	
                 }
             });
         }
@@ -2599,8 +2870,13 @@
             if (currentUser && currentPage === 'settings' && currentSettingTab === 'users' && currentUser.role === 'admin') {
                 renderSettingsUsers().then(html => {
                     const settingsContent = document.getElementById('settings-content');
-                    if (settingsContent) settingsContent.innerHTML = html;
-                    // Os eventos são anexados DENTRO do then (attachSettingsUsersEvents), mas agora a função está no escopo correto.
+                    if (settingsContent) {
+                         // Evita re-renderizar se a aba mudou rapidamente
+                         if (currentSettingTab === 'users') {
+                            settingsContent.innerHTML = html;
+                            attachSettingsUsersEvents();
+                         }
+                    }
                 });
             } else if (currentUser && currentPage === 'settings' && currentSettingTab === 'my-profile') {
                 // Já está renderizado, só anexa eventos
@@ -2640,11 +2916,12 @@
         // Funções CRUD de Usuários
         window.loadUserForEdit = loadUserForEdit;
         window.deleteUser = deleteUser;
+
+        // NOVO: Login Google e Pendências
+        window.handleGoogleLogin = handleGoogleLogin;
         
         window.onload = initApp;
 
     </script>
 </body>
 </html>
-
-

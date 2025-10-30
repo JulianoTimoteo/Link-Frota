@@ -297,6 +297,11 @@
             </div>
         </div>
     </div>
+    
+    <!-- NOVO: Modal de Perfil Pessoal (antiga aba de Configurações) -->
+    <div id="profile-modal" class="fixed inset-0 z-40 hidden items-center justify-center p-4 modal-overlay">
+        <!-- Conteúdo do perfil será injetado aqui -->
+    </div>
 
     <!-- Firebase SDKs -->
     <script type="module">
@@ -390,23 +395,25 @@
         
         // --- Constantes de Tooltip para Importação ---
         const RADIO_IMPORT_INFO = `
-            O arquivo CSV ou XLSX deve conter as seguintes colunas obrigatórias:
-            <ul class="list-disc list-inside mt-2 space-y-1">
-                <li class="font-semibold">Numero de Serie</li>
-                <li class="font-semibold">Modelo</li>
+            O arquivo CSV ou XLSX deve conter as seguintes colunas obrigatórias (a ordem não importa, mas os nomes devem ser exatos ou variantes comuns):
+            <ul class="list-disc list-inside mt-2 space-y-1 font-mono">
+                <li class="font-bold">Numero de Serie</li>
+                <li class="font-bold">Modelo (ou Modelo de Radio)</li>
             </ul>
-            Outras colunas serão ignoradas.
+            <p class="mt-3">Exemplo de dados (CSV):<br><span class="bg-gray-100 p-1 rounded block text-sm">"Numero de Serie",Modelo<br>15154s5asd51,EM200</span></p>
+            <p class="mt-2 text-red-500">Duplicatas de "Numero de Serie" serão ignoradas.</p>
         `;
 
         const EQUIPAMENTO_IMPORT_INFO = `
             O arquivo CSV ou XLSX deve conter as seguintes colunas obrigatórias:
-            <ul class="list-disc list-inside mt-2 space-y-1">
-                <li class="font-semibold">Frota</li>
-                <li class="font-semibold">Grupo (Deve ser um dos: Colheita, Transporte, Oficina, TPL, Industria)</li>
-                <li class="font-semibold">Modelo do Equipamento</li>
-                <li class="font-semibold">Subgrupo (Descrição do Equipamento)</li>
+            <ul class="list-disc list-inside mt-2 space-y-1 font-mono">
+                <li class="font-bold">Frota</li>
+                <li class="font-bold">Grupo (Deve ser um dos: Colheita, Transporte, Oficina, TPL, Industria)</li>
+                <li class="font-bold">Modelo do Equipamento (ou Modelo Equipamento)</li>
+                <li class="font-bold">Subgrupo (ou Descricao do Equipamento)</li>
             </ul>
-            <p class="mt-2"><span class="font-semibold">Coluna Opcional:</span> Gestor</p>
+            <p class="mt-3"><span class="font-semibold">Coluna Opcional:</span> Gestor</p>
+            <p class="mt-2 text-red-500">Duplicatas de "Frota" serão ignoradas.</p>
         `;
 
 
@@ -415,6 +422,26 @@
             firestoreListeners.forEach(unsub => unsub());
             firestoreListeners = [];
         }
+
+        /**
+         * [NOVO] Função para adicionar logs de atividade.
+         */
+        async function addLogEntry(action, userEmail, details = {}) {
+            if (!db || !appId) return;
+            try {
+                const logsColRef = collection(db, `artifacts/${appId}/public/data/logs`);
+                await addDoc(logsColRef, {
+                    timestamp: new Date().toISOString(),
+                    action: action,
+                    user: userEmail,
+                    details: details
+                });
+            } catch (e) {
+                console.error("Erro ao registrar log:", e);
+                // Falha silenciosa para não quebrar a funcionalidade principal
+            }
+        }
+
 
         async function loadInitialSettings() {
             if (!db || !appId) return;
@@ -901,6 +928,8 @@
                 batch.update(settingsDocRef, { users: usersFromDB });
                 
                 await batch.commit();
+                
+                addLogEntry('USER_APPROVED', currentUser.email, { approved_email: email, pending_id: pendingId });
 
                 // 3. Notificar sucesso e fechar modal
                 hideModal();
@@ -925,6 +954,8 @@
             
             try {
                 await deleteDoc(pendingDocRef);
+                
+                addLogEntry('USER_REJECTED', currentUser.email, { rejected_name: name, pending_id: pendingId });
 
                 // 2. Notificar sucesso e fechar modal
                 hideModal();
@@ -983,6 +1014,8 @@
                     tempPassword: senhaProvisoria, // A senha provisória é apenas para referência do Admin
                     createdAt: new Date().toISOString()
                 });
+                
+                addLogEntry('ACCESS_REQUEST', email);
 
                 showModal('Solicitação Enviada', 
                     `Sua solicitação de acesso foi enviada com sucesso para aprovação. Você será notificado após a análise.`, 
@@ -1065,7 +1098,89 @@
         
         // --- FIM NOVAS FUNÇÕES: Gerenciamento de Pendências ---
 
-        // --- NOVAS FUNÇÕES: Gerenciamento Pessoal (Meu Perfil) ---
+        /**
+         * [NOVO] Função para renderizar o modal de Perfil Pessoal
+         */
+        function renderProfileModal() {
+             const user = currentUser;
+             if (!user) return;
+
+             const modalHtml = `
+                <div class="bg-white rounded-xl shadow-2xl w-full max-w-xl transform transition-all scale-100 opacity-100 p-6">
+                    <div class="flex justify-between items-center mb-4 border-b pb-3">
+                        <h3 class="text-2xl font-bold text-gray-800 flex items-center space-x-2">
+                            ${getUserAvatar(user)}
+                            <span>Meu Perfil</span>
+                        </h3>
+                        <button onclick="document.getElementById('profile-modal').classList.add('hidden')" class="text-gray-400 hover:text-gray-600 p-2 rounded-full hover:bg-gray-100 transition-colors" title="Fechar">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <!-- Informações do Perfil -->
+                        <div class="space-y-4">
+                            <div class="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                                <p class="text-sm text-gray-600">Seu Email (Username):</p>
+                                <p class="font-semibold text-gray-800">${user.email}</p>
+                            </div>
+                            <div class="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                                <p class="text-sm text-gray-600">Seu Perfil:</p>
+                                <p class="font-bold text-green-main">${user.role.toUpperCase()}</p>
+                            </div>
+                            <!-- 1. Gerenciar Nome de Exibição -->
+                            <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+                                <h4 class="text-base font-semibold text-gray-800 mb-3">Gerenciar Nome de Exibição</h4>
+                                <form id="form-personal-name" class="space-y-3">
+                                    <div>
+                                        <label for="profile-name" class="block text-xs font-medium text-gray-700">Nome de Exibição Atual</label>
+                                        <input type="text" id="profile-name" required value="${user.name}"
+                                            class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-main focus:ring-green-main p-2 border text-sm">
+                                    </div>
+                                    <button type="submit" class="w-full flex justify-center py-2 px-3 border border-transparent text-sm font-medium rounded-lg text-white bg-green-main hover:bg-green-700 shadow-md">
+                                        <i class="fas fa-save mr-2"></i> Salvar Nome
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+
+                        <!-- 2. Alterar Senha -->
+                        <div class="bg-white p-4 rounded-xl shadow-sm border border-red-200">
+                            <h4 class="text-base font-semibold text-red-600 mb-3">Alterar Senha</h4>
+                            <p class="text-xs text-red-500 mb-3">
+                                Atenção: Você pode precisar fazer login novamente após a alteração.
+                            </p>
+                            <form id="form-change-password" class="space-y-3">
+                                <div>
+                                    <label for="profile-new-password" class="block text-xs font-medium text-gray-700">Nova Senha</label>
+                                    <input type="password" id="profile-new-password" required minlength="6"
+                                        class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-red-500 focus:ring-red-500 p-2 border text-sm">
+                                </div>
+                                <div>
+                                    <label for="profile-confirm-password" class="block text-xs font-medium text-gray-700">Confirmar Nova Senha</label>
+                                    <input type="password" id="profile-confirm-password" required minlength="6"
+                                        class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-red-500 focus:ring-red-500 p-2 border text-sm">
+                                </div>
+                                <button type="submit" class="w-full flex justify-center py-2 px-3 border border-transparent text-sm font-medium rounded-lg text-white bg-red-600 hover:bg-red-700 shadow-md">
+                                    <i class="fas fa-lock mr-2"></i> Alterar Senha
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+             `;
+            
+             const profileModal = document.getElementById('profile-modal');
+             profileModal.innerHTML = modalHtml;
+             profileModal.classList.remove('hidden');
+             profileModal.classList.add('flex');
+
+             // Anexa eventos DENTRO do modal
+             document.getElementById('form-personal-name').onsubmit = savePersonalName;
+             document.getElementById('form-change-password').onsubmit = changePassword;
+        }
+
+        // --- Funções de Perfil Pessoal (Mantidas e movidas para o escopo global) ---
 
         async function savePersonalName(e) {
             e.preventDefault();
@@ -1090,6 +1205,7 @@
                 await setDoc(settingsDocRef, { users: usersFromDB }, { merge: true });
                 // Atualiza o estado local do usuário e força renderização
                 currentUser.name = newName;
+                document.getElementById('profile-modal').classList.add('hidden'); // Fecha modal
                 showModal('Sucesso', 'Nome de exibição atualizado com sucesso!', 'success');
                 renderApp();
             } catch (e) {
@@ -1119,8 +1235,8 @@
             }
 
             try {
-                // O Firebase Auth cuida da reautenticação se necessário.
                 await updatePassword(user, newPassword);
+                document.getElementById('profile-modal').classList.add('hidden'); // Fecha modal
                 showModal('Sucesso', 'Senha alterada com sucesso! Você pode ser solicitado a fazer login novamente.', 'success');
                 document.getElementById('form-change-password').reset();
             } catch (error) {
@@ -1135,7 +1251,7 @@
             }
         }
         
-        // --- FIM NOVAS FUNÇÕES: Gerenciamento Pessoal (Meu Perfil) ---
+        // --- FIM MOVIMENTAÇÃO DE FUNÇÕES ---
 
         // --- Funções de Importação ---
         // ... (resto das funções de importação)
@@ -1153,6 +1269,8 @@
                 if (file.name.endsWith('.csv')) {
                     Papa.parse(data, {
                         header: true, skipEmptyLines: true,
+                        // Adicionando step para limpar os nomes das colunas (ex: "Numero de Serie\r\n" -> "Numero de Serie")
+                        transformHeader: (header) => header ? header.replace(/[^a-zA-Z0-9\s]/g, '').trim() : header, 
                         complete: function(results) {
                             processImportedData(collection, results.data);
                         }
@@ -1161,8 +1279,29 @@
                     const workbook = XLSX.read(data, { type: 'binary' });
                     const firstSheetName = workbook.SheetNames[0];
                     const worksheet = workbook.Sheets[firstSheetName];
-                    parsedData = XLSX.utils.sheet_to_json(worksheet);
-                    processImportedData(collection, parsedData);
+                    // [CORREÇÃO] Usando header: 1 para ler nomes de colunas como strings e tratar no código
+                    parsedData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }); 
+                    
+                    // Tratamento de cabeçalho para XLSX: assume a primeira linha como cabeçalho
+                    if (parsedData.length > 0) {
+                        const headers = parsedData[0].map(h => h ? String(h).replace(/[^a-zA-Z0-9\s]/g, '').trim() : '');
+                        const dataRows = parsedData.slice(1);
+                        
+                        const finalData = dataRows.map(row => {
+                            let obj = {};
+                            headers.forEach((header, index) => {
+                                // Mapeia o valor da coluna para o nome do cabeçalho limpo
+                                if (header) obj[header] = row[index];
+                            });
+                            return obj;
+                        }).filter(obj => Object.keys(obj).length > 0); // Remove linhas vazias
+
+                        processImportedData(collection, finalData);
+
+                    } else {
+                        processImportedData(collection, []); // Arquivo vazio
+                    }
+
                 } else {
                     showModal('Erro', 'Formato de arquivo não suportado. Use CSV ou XLSX.', 'error');
                 }
@@ -1187,7 +1326,8 @@
                 let isDuplicate = false;
                 
                 if (collectionName === 'radios') {
-                    const serie = item['Numero de Serie'] || item['Numero deSerie'] || item['serie'];
+                    // [CORREÇÃO] Procurando por variações dos nomes de coluna
+                    const serie = item['Numero de Serie'] || item['Numero deSerie'] || item['serie'] || item['Numero de Serie\r'] || item['Numero de Serie\n'];
                     const modelo = item['Modelo'] || item['Modelo de Radio'] || item['modelo'];
                     
                     if (!serie || !modelo) continue;
@@ -1196,17 +1336,18 @@
                     record.modelo = String(modelo).trim();
                     record.status = 'Disponível';	
 
-                    // [CORREÇÃO] Checagem de duplicidade no cache local
+                    // [VALIDAÇÃO] Checagem de duplicidade no cache local
                     if (currentDb.some(r => r.serie === record.serie)) {
                         console.warn(`Rádio duplicado (cache local): ${record.serie}. Ignorando.`);
                         isDuplicate = true;
                     }
                     
                 } else if (collectionName === 'equipamentos') {
+                    // [CORREÇÃO] Procurando por variações dos nomes de coluna
                     const frota = item['Frota'];
                     const grupo = item['Grupo'];
-                    const modeloEq = item['Modelo do Equipamento'] || item['Modelo Equipamento'];
-                    const subgrupo = item['Subgrupo'] || item['Descricao do Equipamento'] || item['Descricao Equipamento'];
+                    const modeloEq = item['Modelo do Equipamento'] || item['ModeloEquipamento'] || item['Modelo Equipamento'];
+                    const subgrupo = item['Subgrupo'] || item['Descricao do Equipamento'] || item['DescricaoEquipamento'] || item['Descricao Equipamento'];
                     const gestor = item['Gestor'] || 'Sem Gestor';
                     
                     if (!frota || !grupo || !modeloEq || !subgrupo || !GROUPS.includes(String(grupo).trim())) {
@@ -1220,7 +1361,7 @@
                     record.subgrupo = String(subgrupo).trim();	
                     record.gestor = String(gestor).trim();
                     
-                    // [CORREÇÃO] Checagem de duplicidade no cache local
+                    // [VALIDAÇÃO] Checagem de duplicidade no cache local
                     if (currentDb.some(r => r.frota === record.frota)) {
                         console.warn(`Equipamento duplicado (cache local): ${record.frota}. Ignorando.`);
                         isDuplicate = true;
@@ -1251,6 +1392,8 @@
                     if (ignoredCount > 0) {
                         msg += `<br>(${ignoredCount} duplicatas ignoradas.)`;
                     }
+                    addLogEntry('BULK_IMPORT', currentUser.email, { collection: collectionName, imported: newRecords.length, ignored: ignoredCount });
+
                     showModal('Importação Concluída', msg, 'success');
                 } catch (error) {
                     console.error("Erro ao salvar importação em lote:", error);
@@ -1264,6 +1407,47 @@
                 showModal('Importação', msg, 'info');
             }
         }
+
+        /**
+         * [NOVO] Função para exportar dados gerais (registros + rádio + equipamento)
+         */
+        function exportGeralDataToXLSX() {
+            if (dbRegistros.length === 0) {
+                showModal('Erro de Exportação', 'Não há registros para exportar.', 'warning');
+                return;
+            }
+
+            const radioMap = dbRadios.reduce((acc, r) => { acc[r.id] = r; return acc; }, {});
+            const equipamentoMap = dbEquipamentos.reduce((acc, e) => { acc[e.id] = e; return acc; }, {});
+
+            const exportData = dbRegistros.map(reg => {
+                const r = radioMap[reg.radioId] || {};
+                const e = equipamentoMap[reg.equipamentoId] || {};
+                
+                return {
+                    'Código': e.codigo || reg.codigo || 'N/A',
+                    'Frota': e.frota || 'N/A',
+                    'Grupo': e.grupo || 'N/A',
+                    'Subgrupo': e.subgrupo || 'N/A',
+                    'Gestor': e.gestor || 'N/A',
+                    'Série Rádio': r.serie || 'N/A',
+                    'Modelo Rádio': r.modelo || 'N/A',
+                    'Data de Associação': reg.createdAt ? new Date(reg.createdAt).toLocaleString() : 'N/A'
+                };
+            });
+
+            const worksheet = XLSX.utils.json_to_sheet(exportData);
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, "Registros Ativos");
+
+            const date = new Date().toISOString().slice(0, 10);
+            const filename = `registros_geral_${date}.xlsx`;
+            XLSX.writeFile(workbook, filename);
+
+            addLogEntry('EXPORT_DATA', currentUser.email, { filename: filename, count: exportData.length, collection: 'registros' });
+            showModal('Sucesso', `Dados exportados com sucesso para ${filename}`, 'success');
+        }
+
 
         // --- Funções de Modal ---
         function showModal(title, message, type = 'info') {
@@ -1428,8 +1612,8 @@
                                 <span class="text-sm font-medium text-gray-600 hidden sm:inline">
                                     Olá, ${currentUser.name}
                                 </span>
-                                <!-- Botão de Perfil Pessoal -->
-                                <button onclick="updateState('settingTab', 'my-profile'); updateState('page', 'settings');" class="text-gray-500 hover:text-green-main transition-colors p-1 rounded-full hover:bg-gray-100" title="Meu Perfil / Gerenciar Senha">
+                                <!-- Botão de Perfil Pessoal (Chama o Modal) -->
+                                <button onclick="renderProfileModal()" class="text-gray-500 hover:text-green-main transition-colors p-1 rounded-full hover:bg-gray-100" title="Meu Perfil / Gerenciar Senha">
                                     ${getUserAvatar(currentUser)}
                                 </button>
                                 <button onclick="handleLogout()" class="text-gray-500 hover:text-red-500 transition-colors p-1 rounded-full hover:bg-gray-100" title="Sair do Sistema">
@@ -1465,7 +1649,8 @@
         function renderLogin() {
             // [NOVO] Recupera o email salvo
             const savedEmail = localStorage.getItem('rememberedEmail') || '';
-            const rememberMeChecked = savedEmail ? 'checked' : '';
+            const savedPassword = localStorage.getItem('rememberedPassword') || '';
+            const rememberMeChecked = savedEmail || savedPassword ? 'checked' : '';
             
             let content;
             if (currentLoginView === 'login') {
@@ -1473,7 +1658,7 @@
                     <div class="text-center">
                         <img src="https://usinapitangueiras.com.br/wp-content/uploads/2020/04/usina-pitangueiras-logo.png" alt="Logo Usina Pitangueiras"	
                             class="mx-auto h-20 w-auto mb-4"	
-                            onerror="this.onerror=null; this.src='https://placehold.co/150x80/40800c/FFFFFF?text=Logo'; this.alt='Logo Placeholder'">
+                            onerror="this.onerror=null; this.src='https://placehold.co/150x80/000000/FFFFFF?text=Logo'; this.alt='Logo Placeholder'">
                         <h2 class="text-3xl font-extrabold text-gray-900">
                             Acesso ao Sistema
                         </h2>
@@ -1489,20 +1674,20 @@
                         <div class="relative">
                             <input type="password" id="password" placeholder="Senha" required	
                                 class="appearance-none relative block w-full px-4 py-3 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-lg focus:outline-none focus:ring-green-main focus:border-green-main focus:z-10 sm:text-sm shadow-sm pr-10"
-                                value=""
+                                value="${savedPassword}"
                             >
                             <button type="button" id="toggle-password" class="absolute inset-y-0 right-0 px-3 flex items-center text-gray-500 hover:text-gray-700 focus:outline-none" title="Mostrar/Ocultar Senha">
                                 <i id="toggle-password-icon" class="fas fa-eye"></i>
                             </button>
                         </div>
                         
-                        <!-- NOVO: Checkbox Lembrar Email -->
+                        <!-- NOVO: Checkbox Lembrar Email e Senha -->
                         <div class="flex items-center justify-between">
                             <div class="flex items-center">
                                 <input id="remember-me" name="remember-me" type="checkbox" ${rememberMeChecked}
                                     class="h-4 w-4 text-green-main border-gray-300 rounded focus:ring-green-main">
                                 <label for="remember-me" class="ml-2 block text-sm text-gray-900">
-                                    Lembrar Email
+                                    Lembrar E-mail e Senha
                                 </label>
                             </div>
                         </div>
@@ -1526,11 +1711,11 @@
             }
 
             return `
-                <!-- Fundo escuro para visual futurístico -->
-                <div class="flex items-center justify-center min-h-screen bg-gray-900">
-                    <div class="w-full max-w-md p-8 space-y-8 bg-white/95 backdrop-blur-sm rounded-xl shadow-2xl border border-green-main/30">
+                <!-- Fundo BRANCO extremo para visual futurístico -->
+                <div class="flex items-center justify-center min-h-screen bg-white">
+                    <div class="w-full max-w-md p-8 space-y-8 bg-white/95 backdrop-blur-sm rounded-xl shadow-2xl border border-gray-100">
                         ${content}
-                        <p class="text-xs text-center text-gray-500">
+                        <p class="text-xs text-center text-black font-extrabold">
                             Usina Pitangueiras - "A ENERGIA QUE MOVE A REGIÃO"
                         </p>
                     </div>
@@ -1588,7 +1773,7 @@
         
         function renderLoadingScreen() {
             return `
-                <div class="flex flex-col items-center justify-center min-h-screen bg-gray-900">
+                <div class="flex flex-col items-center justify-center min-h-screen bg-white">
                     <!-- Imagem Inteira e Transição Suave (não mais em círculo) -->
                     <img src="https://usinapitangueiras.com.br/wp-content/uploads/2020/04/usina-pitangueiras-logo.png" alt="Logo Usina Pitangueiras"	
                         class="h-40 w-auto mb-10 loader-logo-full"	
@@ -2249,11 +2434,16 @@
                     <div class="lg:col-span-2">
                         <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center mb-4 gap-2">
                             <h4 class="text-lg font-semibold text-gray-800">Registros Ativos (Total: ${dbRegistros.length})</h4>
-                            <input type="text" id="geral-search-input" value="${geralSearch}"	
-                                oninput="handleSearchInput(this, 'geralSearch', 1)"	
-                                placeholder="Buscar Código, Série ou Frota..."	
-                                class="rounded-md border-gray-300 shadow-sm focus:border-green-main focus:ring-green-main p-2 border text-sm w-full sm:w-1/2">
+                            <!-- Botão de Exportação -->
+                            <button onclick="exportGeralDataToXLSX()" class="py-2 px-3 border border-transparent text-sm font-medium rounded-lg text-white bg-blue-500 hover:bg-blue-600 shadow-md flex-shrink-0">
+                                <i class="fas fa-file-export mr-2"></i> Exportar XLSX
+                            </button>
                         </div>
+                        <input type="text" id="geral-search-input" value="${geralSearch}"	
+                            oninput="handleSearchInput(this, 'geralSearch', 1)"	
+                            placeholder="Buscar Código, Série ou Frota..."	
+                            class="rounded-md border-gray-300 shadow-sm focus:border-green-main focus:ring-green-main p-2 border text-sm w-full sm:w-1/2 mb-4">
+
                         <div class="bg-white border rounded-xl shadow-inner overflow-x-auto">
                             <table class="min-w-full divide-y divide-gray-200">
                                 <thead class="bg-gray-50">
@@ -2385,16 +2575,20 @@
             const isAdmin = currentUser && currentUser.role === 'admin';
             
             const tabs = [
-                { id: 'my-profile', name: 'Meu Perfil', icon: 'fa-user' }, // NOVA ABA
+                { id: 'my-profile', name: 'Meu Perfil', icon: 'fa-user' }, // MANTIDA PARA REDIRECIONAMENTO/LOGICA DE ABA INTERNA
                 { id: 'system', name: 'Mapeamento', icon: 'fa-sitemap' },
                 { id: 'users', name: 'Usuários', icon: 'fa-users', requiredRole: 'admin' },
             ];
 
-            const filteredTabs = tabs.filter(tab => !tab.requiredRole || (tab.requiredRole === 'admin' && isAdmin) || tab.id === 'my-profile');
+            const filteredTabs = tabs.filter(tab => !tab.requiredRole || (tab.requiredRole === 'admin' && isAdmin));
 
             const tabNav = filteredTabs.map(tab => {
                 const isActive = currentSettingTab === tab.id;
                 const activeClass = isActive ? 'text-green-main border-green-main font-semibold' : 'text-gray-500 border-transparent hover:text-green-main';
+                
+                // Ignoramos a aba 'my-profile' na navegação principal das Configurações, pois ela é um modal agora
+                if (tab.id === 'my-profile') return ''; 
+
                 return `
                     <a href="#settings/${tab.id}" class="py-2 px-4 border-b-2 ${activeClass} transition-colors text-sm sm:text-base flex items-center space-x-2">
                         <i class="fas ${tab.icon}"></i>
@@ -2404,10 +2598,25 @@
             }).join('');
             
             let content = '';
+            
+            // Se a aba for my-profile, re-direcionamos para o default 'system' se for admin, ou 'acesso negado'
+            if (currentSettingTab === 'my-profile') {
+                if (isAdmin) {
+                    currentSettingTab = 'system';
+                } else {
+                    // Usuário não-admin não tem acesso a Configurações, mas o botão de perfil abre o modal
+                    return `
+                        <div class="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
+                            <h2 class="text-3xl font-bold text-gray-900 mb-6 text-center">Configurações do Sistema</h2>
+                            <div class="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
+                                <p class="p-6 text-red-500 font-semibold">Acesso negado. Esta área é restrita.</p>
+                            </div>
+                        </div>
+                    `;
+                }
+            }
+            
             switch (currentSettingTab) {
-                case 'my-profile':
-                    content = renderSettingsMyProfile();
-                    break;
                 case 'system':
                     content = renderSettingsSystem();
                     break;
@@ -2418,8 +2627,8 @@
                     }
                     break;
                 default:
-                    currentSettingTab = 'my-profile'; // Redireciona default
-                    content = renderSettingsMyProfile();
+                    currentSettingTab = 'system';
+                    content = renderSettingsSystem();
             }
 
             return `
@@ -2429,61 +2638,6 @@
                     <div class="bg-white rounded-xl shadow-lg border border-gray-200">
                         <div id="settings-nav" class="flex border-b border-gray-200 px-6 pt-2 overflow-x-auto">${tabNav}</div>
                         <div id="settings-content" class="p-6">${content}</div>
-                    </div>
-                </div>
-            `;
-        }
-        
-        function renderSettingsMyProfile() {
-            return `
-                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 max-w-4xl">
-                    <!-- 1. Gerenciar Nome de Exibição -->
-                    <div class="bg-gray-50 p-6 rounded-xl shadow-inner border border-gray-200">
-                        <h4 class="text-xl font-semibold text-gray-800 mb-4 flex items-center">
-                            <i class="fas fa-user-edit mr-2 text-green-main"></i> Gerenciar Nome de Exibição
-                        </h4>
-                        <p class="text-sm text-gray-600 mb-4">
-                            Altere o nome que aparece na barra superior do sistema.
-                        </p>
-                        <form id="form-personal-name" class="space-y-4">
-                            <div>
-                                <label for="profile-name" class="block text-sm font-medium text-gray-700">Nome de Exibição Atual</label>
-                                <input type="text" id="profile-name" required value="${currentUser.name}"
-                                    class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-main focus:ring-green-main p-2 border">
-                            </div>
-                            <button type="submit" class="w-full flex justify-center py-2 px-3 border border-transparent text-sm font-medium rounded-lg text-white bg-green-main hover:bg-green-700 shadow-md">
-                                <i class="fas fa-save mr-2"></i> Salvar Nome
-                            </button>
-                        </form>
-                        <div class="mt-4 p-3 bg-white border border-gray-200 rounded-lg text-sm text-gray-700">
-                            <p><span class="font-semibold">Seu Email (Username):</span> ${currentUser.email}</p>
-                            <p><span class="font-semibold">Seu Perfil:</span> ${currentUser.role.toUpperCase()}</p>
-                        </div>
-                    </div>
-                    
-                    <!-- 2. Alterar Senha -->
-                    <div class="bg-gray-50 p-6 rounded-xl shadow-inner border border-red-200">
-                        <h4 class="text-xl font-semibold text-gray-800 mb-4 flex items-center">
-                            <i class="fas fa-key mr-2 text-red-600"></i> Alterar Senha
-                        </h4>
-                        <p class="text-sm text-red-600 mb-4">
-                            Atenção: Você pode precisar fazer login novamente após a alteração. A nova senha deve ter no mínimo 6 caracteres.
-                        </p>
-                        <form id="form-change-password" class="space-y-4">
-                            <div>
-                                <label for="profile-new-password" class="block text-sm font-medium text-gray-700">Nova Senha</label>
-                                <input type="password" id="profile-new-password" required minlength="6"
-                                    class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-red-500 focus:ring-red-500 p-2 border">
-                            </div>
-                            <div>
-                                <label for="profile-confirm-password" class="block text-sm font-medium text-gray-700">Confirmar Nova Senha</label>
-                                <input type="password" id="profile-confirm-password" required minlength="6"
-                                    class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-red-500 focus:ring-red-500 p-2 border">
-                            </div>
-                            <button type="submit" class="w-full flex justify-center py-2 px-3 border border-transparent text-sm font-medium rounded-lg text-white bg-red-600 hover:bg-red-700 shadow-md">
-                                <i class="fas fa-lock mr-2"></i> Alterar Senha
-                            </button>
-                        </form>
                     </div>
                 </div>
             `;
@@ -2667,6 +2821,7 @@
 
         async function handleLogout() {
             try {
+                addLogEntry('LOGOUT', currentUser ? currentUser.email : 'unknown');
                 await signOut(auth);
             } catch (error) {
                 console.error("Erro ao fazer logout:", error);
@@ -2682,11 +2837,13 @@
             const email = emailInput.value;
             const password = passwordInput.value;
             
-            // [NOVO] Salvar/Remover Email no localStorage
+            // [NOVO] Salvar/Remover Email e Senha no localStorage
             if (rememberMeCheckbox.checked) {
                 localStorage.setItem('rememberedEmail', email);
+                localStorage.setItem('rememberedPassword', password);
             } else {
                 localStorage.removeItem('rememberedEmail');
+                localStorage.removeItem('rememberedPassword');
             }
 
             isLoggingIn = true;
@@ -2694,9 +2851,10 @@
 
             try {
                 await signInWithEmailAndPassword(auth, email, password);
-                
+                addLogEntry('LOGIN_SUCCESS', email);
             } catch (error) {
                 console.error("Erro de login:", error.code);
+                addLogEntry('LOGIN_FAILED', email, { error_code: error.code });
                 isLoggingIn = false;
                 renderApp();	
                 
@@ -2999,6 +3157,8 @@
                         // [CORREÇÃO] Usa appId hardcoded
                         const radioRef = doc(db, `artifacts/${appId}/public/data/radios`, radioId);
                         await updateDoc(radioRef, { status: 'Em Uso' });
+                        
+                        addLogEntry('ASSOCIATION_CREATED', currentUser.email, { codigo: codigoDoEquipamento, frota: equipamento.frota, serie: dbRadios.find(r => r.id === radioId)?.serie });
 
                         showModal('Sucesso!', `Equipamento cadastrado! Código: ${codigoDoEquipamento}`, 'success');
                         
@@ -3025,25 +3185,16 @@
         }
 
         function attachSettingsEvents() {
-            if (currentSettingTab === 'my-profile') {
-                attachSettingsMyProfileEvents();
-            } else if (currentSettingTab === 'system') {
+            if (currentSettingTab === 'system') {
                 attachSettingsSystemEvents();
             } else if (currentSettingTab === 'users' && currentUser && currentUser.role === 'admin') {
                 attachSettingsUsersEvents(); 
             }
+            // A tela de perfil agora é um modal (renderProfileModal)
         }
         
         function attachSettingsMyProfileEvents() {
-            const nameForm = document.getElementById('form-personal-name');
-            if (nameForm) {
-                nameForm.onsubmit = savePersonalName;
-            }
-
-            const passwordForm = document.getElementById('form-change-password');
-            if (passwordForm) {
-                passwordForm.onsubmit = changePassword;
-            }
+             // Este é um stub, pois a lógica foi movida para o renderProfileModal
         }
         
         function attachSettingsSystemEvents() {
@@ -3077,6 +3228,7 @@
                         settings.nextIndex = newNextIndex;	
                         
                         await saveSettings();	
+                        addLogEntry('SETTINGS_UPDATED', currentUser.email, { type: 'mapping' });
 
                         showModal('Sucesso', 'Mapeamento de letras salvo!', 'success');
                         renderApp();	
@@ -3161,6 +3313,9 @@
                     // [CORREÇÃO] Usa appId hardcoded
                     await setDoc(settingsDocRef, { users: usersFromDB }, { merge: true });
                     hideModal();
+                    
+                    addLogEntry('PERMISSION_UPDATED', currentUser.email, { target_email: user.email });
+
                     // Retorna o modal ao tamanho padrão
                     document.getElementById('global-modal').querySelector('div').classList.remove('max-w-lg');
                     document.getElementById('global-modal').querySelector('div').classList.add('max-w-sm');
@@ -3259,6 +3414,7 @@
                             currentUser = { ...appUser, uid: user.uid, email: user.email };
                             isAuthReady = true;
                             isLoggingIn = false;	
+                            addLogEntry('LOGIN_SUCCESS', user.email);
                             await attachFirestoreListeners();	
                         } else {
                             // Usuário autenticado, mas sem perfil no Firestore (não aprovado).
@@ -3323,7 +3479,10 @@
                 const canAccessCurrentPage = currentUser.role === 'admin' || (currentUser.permissions && currentUser.permissions[currentPage]);
 
                 if (!canAccessCurrentPage && currentPage !== 'login') {
-                    showModal('Acesso Negado', 'Você não tem permissão para acessar esta página.', 'error');
+                    // Se tentar acessar uma aba sem permissão, volta para o dashboard
+                    if (currentPage !== 'dashboard') {
+                        showModal('Acesso Negado', 'Você não tem permissão para acessar esta página.', 'error');
+                    }
                     currentPage = 'dashboard';
                     window.location.hash = '#dashboard';
                     contentHTML += renderDashboard();
@@ -3374,9 +3533,6 @@
                          }
                     }
                 });
-            } else if (currentUser && currentPage === 'settings' && currentSettingTab === 'my-profile') {
-                // Já está renderizado, só anexa eventos
-                // Estes eventos são anexados via attachSettingsEvents > attachSettingsMyProfileEvents
             }
 
             // Restaura o foco da busca
@@ -3396,12 +3552,19 @@
         
         window.onhashchange = handleHashChange;
         
+        // [CORREÇÃO CRÍTICA] Expondo as funções de modal para o escopo global
+        window.showModal = showModal;
+        window.showConfirmModal = showConfirmModal;
+        window.hideModal = hideModal;
+        
+        window.renderProfileModal = renderProfileModal;
+        window.savePersonalName = savePersonalName;
+        window.changePassword = changePassword;
+
         window.handleLogout = handleLogout;
         window.handleSearchInput = handleSearchInput;
         window.loadRadioForEdit = loadRadioForEdit;
         window.loadEquipamentoForEdit = loadEquipamentoForEdit;
-        window.showConfirmModal = showConfirmModal;
-        window.hideModal = hideModal;
         window.handleImport = handleImport;
         window.showPermissionModal = showPermissionModal;
         window.renderApp = renderApp;	
@@ -3417,11 +3580,14 @@
         window.setRadioPage = setRadioPage;
         window.setEquipamentoPage = setEquipamentoPage;
         window.setGeralPage = setGeralPage;
+        
+        // NOVO: Exportação
+        window.exportGeralDataToXLSX = exportGeralDataToXLSX;
 
         // NOVO: Solicitar Acesso
         window.handleSolicitarAcesso = handleSolicitarAcesso; // Exportado para uso no formulário de solicitação
         
-        // NOVO: Informações de Importação
+        // NOVO: Informações de Importação (Constantes)
         window.RADIO_IMPORT_INFO = RADIO_IMPORT_INFO;
         window.EQUIPAMENTO_IMPORT_INFO = EQUIPAMENTO_IMPORT_INFO;
 

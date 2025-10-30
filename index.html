@@ -73,6 +73,211 @@
             0%, 100% { opacity: 1; }
             50% { opacity: 0.6; }
         }
+        
+        /* --- ESTILOS DE RADIO BUTTON FUTURISTA (AJUSTADO PARA NAVEGAÇÃO SEM FUNDO) --- */
+        .fullscreen-container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            min-height: 100%;
+            font-family: 'Inter', sans-serif;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        /* Removendo fundo, blur e bordas escuras. Apenas alinhamento. */
+        .radio-group-container {
+            background-color: transparent; /* Fundo transparente */
+            padding: 0;
+            border-radius: 0;
+            border: none;
+            backdrop-filter: none;
+            -webkit-backdrop-filter: none;
+            width: 100%; 
+            max-width: 100%; 
+            transition: all 0.3s ease;
+            
+            display: flex; 
+            flex-wrap: wrap;
+            justify-content: flex-start; /* Alinhando à esquerda como a navegação original */
+        }
+
+        .radio-label {
+            display: flex;
+            align-items: center;
+            /* Usando padding em vez de margin para simular o espaçamento da aba */
+            padding: 10px 15px; 
+            margin: 0;
+            cursor: pointer;
+            position: relative;
+            user-select: none;
+            min-width: unset; 
+            border-bottom: 2px solid transparent; /* Para simular a aba */
+            transition: all 0.3s ease;
+        }
+        
+        /* Oculta os inputs nativos */
+        .radio-input {
+            display: none;
+        }
+
+        .radio-custom {
+            width: 20px; /* Reduzido um pouco */
+            height: 20px;
+            background-color: transparent;
+            border: 2px solid #5c5e79;
+            border-radius: 50%;
+            margin-right: 12px; /* Reduzido o espaçamento */
+            position: relative;
+            transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+
+        .radio-custom::before {
+            content: "";
+            position: absolute;
+            width: 8px; /* Reduzido */
+            height: 8px;
+            background: #8a8b9f;
+            border-radius: 50%;
+            transform: scale(0);
+            transition: all 0.3s cubic-bezier(0.23, 1, 0.32, 1);
+        }
+
+        .radio-custom::after {
+            /* O anel de órbita será mantido para o efeito visual moderno */
+            content: "";
+            position: absolute;
+            width: 30px; /* Reduzido */
+            height: 30px;
+            border: 2px solid transparent;
+            border-radius: 50%;
+            border-top-color: #00a6ff;
+            opacity: 0;
+            transform: scale(0.8);
+            transition: all 0.4s ease;
+        }
+
+        .radio-text {
+            font-size: 0.9rem; /* Ajustado para caber melhor na navegação */
+            font-weight: 500;
+            color: #5c5e79; /* Cor do texto padrão da nav (cinza) */
+            transition: color 0.3s ease;
+        }
+
+        /* Efeitos de Hover */
+        .radio-label:hover {
+            border-bottom-color: #00a6ff40; /* Hover suave */
+        }
+        .radio-label:hover .radio-input:not(:checked) + .radio-custom {
+            transform: scale(1.1);
+            border-color: #8a8daf;
+        }
+        .radio-label:hover .radio-text {
+            color: #333; /* Cinza mais escuro no hover */
+        }
+
+        /* ESTADO CHECADO (ATIVO) */
+        .radio-input:checked + .radio-custom {
+            border-color: #00a6ff;
+            transform: scale(0.9);
+        }
+
+        .radio-input:checked + .radio-custom::before {
+            transform: scale(1);
+            background-color: #00a6ff;
+        }
+
+        .radio-input:checked + .radio-custom::after {
+            opacity: 1;
+            transform: scale(1.3);
+            animation: orbit 2.5s infinite linear;
+            box-shadow: 0 0 10px #00a6ff60; /* Sombra mais suave */
+        }
+
+        .radio-input:checked ~ .radio-text {
+            color: #00a6ff; /* Cor do texto ativo */
+            font-weight: 600;
+        }
+        
+        /* A cor ativa da aba/label */
+        .radio-input:checked ~ .radio-text,
+        .radio-input:checked + .radio-custom {
+            /* Borda verde da navegação original simulada aqui */
+            border-bottom: 2px solid #00a6ff; 
+        }
+        .radio-label:has(input:checked) {
+            border-bottom: 2px solid #00a6ff;
+        }
+        
+        /* --- Mapeamento de Cores para as 4 Opções --- */
+
+        /* 1. Dashboard (Azul) - Cor Principal: #00a6ff */
+        /* O estilo principal já é azul, não precisa de nth-child(1) */
+        
+        /* 2. Cadastro (Roxa) - Cor: #e900ff */
+        .radio-label:nth-child(2) .radio-input:checked + .radio-custom { border-color: #e900ff; }
+        .radio-label:nth-child(2) .radio-input:checked + .radio-custom::before { background-color: #e900ff; }
+        .radio-label:nth-child(2) .radio-input:checked + .radio-custom::after { border-top-color: #e900ff; box-shadow: 0 0 10px #e900ff60; }
+        .radio-label:nth-child(2) .radio-input:checked ~ .radio-text { color: #e900ff; }
+        .radio-label:nth-child(2):has(input:checked) { border-bottom: 2px solid #e900ff; }
+
+        /* 3. Pesquisa (Verde Água) - Cor: #00ffc2 */
+        .radio-label:nth-child(3) .radio-input:checked + .radio-custom { border-color: #00ffc2; }
+        .radio-label:nth-child(3) .radio-input:checked + .radio-custom::before { background-color: #00ffc2; }
+        .radio-label:nth-child(3) .radio-input:checked + .radio-custom::after { border-top-color: #00ffc2; box-shadow: 0 0 10px #00ffc260; }
+        .radio-label:nth-child(3) .radio-input:checked ~ .radio-text { color: #00ffc2; }
+        .radio-label:nth-child(3):has(input:checked) { border-bottom: 2px solid #00ffc2; }
+
+        /* 4. Configurações (Laranja) - Cor: #ff9900 */
+        .radio-label:nth-child(4) .radio-input:checked + .radio-custom { border-color: #ff9900; }
+        .radio-label:nth-child(4) .radio-input:checked + .radio-custom::before { background-color: #ff9900; }
+        .radio-label:nth-child(4) .radio-input:checked + .radio-custom::after { border-top-color: #ff9900; box-shadow: 0 0 10px #ff990060; }
+        .radio-label:nth-child(4) .radio-input:checked ~ .radio-text { color: #ff9900; }
+        .radio-label:nth-child(4):has(input:checked) { border-bottom: 2px solid #ff9900; }
+
+
+        @keyframes orbit {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        /* Media Query for Mobile Responsiveness */
+        @media (max-width: 400px) {
+            .radio-group-container {
+                /* Volta para vertical no mobile, mas ainda sem fundo */
+                flex-direction: column;
+                justify-content: flex-start;
+                align-items: flex-start;
+            }
+
+            .radio-label {
+                padding: 10px 0;
+                margin: 0; 
+                width: 100%;
+            }
+
+            .radio-text {
+                font-size: 0.9rem;
+            }
+        }
+        /* --- FIM ESTILOS DE RADIO BUTTON FUTURISTA --- */
+
+        /* Estilo para a tabela de resumo do Dashboard */
+        .dashboard-table-row {
+            transition: background-color 0.2s ease;
+        }
+        .dashboard-table-row:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+        .dashboard-table-row:hover {
+            background-color: #f0fdf4; /* Cor de hover suave */
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+        }
     </style>
 </head>
 <body>
@@ -102,10 +307,7 @@
             signInWithEmailAndPassword, 
             onAuthStateChanged, 
             signOut,
-            updatePassword,
-            // NOVOS IMPORTS DO GOOGLE AUTH
-            GoogleAuthProvider,
-            signInWithPopup
+            updatePassword
         } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { 
             getFirestore, 
@@ -148,6 +350,7 @@
         // --- Variáveis de Estado Global (App) ---
         let currentUser = null;	
         let currentPage = 'login';
+        let currentLoginView = 'login'; // 'login' ou 'solicitar'
         let currentCadastroTab = 'radio';
         let currentSettingTab = 'my-profile'; 
         let isLoggingIn = false;
@@ -165,12 +368,15 @@
         const GROUPS = ['Colheita', 'Transporte', 'Oficina', 'TPL', 'Industria'];
         const DEFAULT_LETTER_MAP = {
             Colheita: 'A',
-            Transporte: 'B',
+            Transporte: 'B', 
             Oficina: 'NUM',
             TPL: 'D',
             Industria: 'C'
         };
         const DEFAULT_NEXT_INDEX = { A: 1, B: 1, C: 1, D: 1, NUM: 1 };
+        
+        // E-mail do Administrador Principal (Corrigido para o email do usuário no último contexto)
+        const ADMIN_PRINCIPAL_EMAIL = 'julianotimoteo@usinapitangueiras.com.br';
 
         // --- Estado do Banco de Dados (In-memory Cache) ---
         let dbRadios = [];
@@ -181,6 +387,28 @@
             nextIndex: DEFAULT_NEXT_INDEX,
             users: []	
         };
+        
+        // --- Constantes de Tooltip para Importação ---
+        const RADIO_IMPORT_INFO = `
+            O arquivo CSV ou XLSX deve conter as seguintes colunas obrigatórias:
+            <ul class="list-disc list-inside mt-2 space-y-1">
+                <li class="font-semibold">Numero de Serie</li>
+                <li class="font-semibold">Modelo</li>
+            </ul>
+            Outras colunas serão ignoradas.
+        `;
+
+        const EQUIPAMENTO_IMPORT_INFO = `
+            O arquivo CSV ou XLSX deve conter as seguintes colunas obrigatórias:
+            <ul class="list-disc list-inside mt-2 space-y-1">
+                <li class="font-semibold">Frota</li>
+                <li class="font-semibold">Grupo (Deve ser um dos: Colheita, Transporte, Oficina, TPL, Industria)</li>
+                <li class="font-semibold">Modelo do Equipamento</li>
+                <li class="font-semibold">Subgrupo (Descrição do Equipamento)</li>
+            </ul>
+            <p class="mt-2"><span class="font-semibold">Coluna Opcional:</span> Gestor</p>
+        `;
+
 
         // --- Funções de Utilitário e Estado ---
         function detachFirestoreListeners() {
@@ -188,48 +416,52 @@
             firestoreListeners = [];
         }
 
-        async function attachFirestoreListeners() {
-            detachFirestoreListeners();	
-            if (!db || !appId || !currentUser) return;
+        async function loadInitialSettings() {
+            if (!db || !appId) return;
 
-            // 1. Carregar Configurações
-            // [CORREÇÃO] Usa appId hardcoded
             const settingsDocRef = doc(db, "artifacts", appId, "public", "data", "settings", "config");
             try {
+                // Tenta ler as configurações. A regra de segurança deve permitir a leitura para corrigir o erro inicial.
                 const settingsSnap = await getDoc(settingsDocRef);
                 if (settingsSnap.exists()) {
                     const data = settingsSnap.data();
                     settings.letterMap = data.letterMap || DEFAULT_LETTER_MAP;
                     settings.nextIndex = data.nextIndex || DEFAULT_NEXT_INDEX;
-                    settings.users = data.users || []; // Garante que a lista de usuários é carregada
+                    settings.users = data.users || []; 
                 } else {
-                    console.warn("Documento de 'settings/config' não encontrado. Criando um novo com padrões.");
+                    console.warn("Documento de 'settings/config' não encontrado. Usando padrões locais.");
                     // Define um usuário admin padrão se não houver configurações
-                    settings.users = settings.users.length === 0 ? [{ 
-                        id: crypto.randomUUID(), 
-                        name: "Juliano Timoteo", 
-                        username: "monitoramentocoa1986@gmail.com", 
-                        role: "admin",
-                        permissions: { dashboard: true, cadastro: true, pesquisa: true, settings: true }
-                    }] : settings.users;
-                    await saveSettings();	
+                    if (settings.users.length === 0) {
+                        settings.users = [{ 
+                            id: crypto.randomUUID(), 
+                            name: "Juliano Timoteo (Admin Padrão)", 
+                            username: ADMIN_PRINCIPAL_EMAIL, 
+                            role: "admin",
+                            permissions: { dashboard: true, cadastro: true, pesquisa: true, settings: true }
+                        }];
+                    }
+                    // Tenta salvar, permitindo que a aplicação se configure se as regras permitirem.
+                    saveSettings();	
                 }
             } catch (e) {
-                console.error("Erro ao carregar 'settings/config':", e);
-                showModal('Erro Crítico', 'Não foi possível carregar as configurações do sistema.', 'error');
+                // Loga o erro, mas a aplicação continua com os valores padrão de settings.users (a contingência no auth listener será usada).
+                console.error("Erro ao carregar 'settings/config' na inicialização:", e);
             }
+        }
 
-            // 2. Sincronizar Coleções
+
+        async function attachFirestoreListeners() {
+            detachFirestoreListeners();	
+            if (!db || !appId || !currentUser) return; // Só anexa se estiver autenticado
+
+            // 1. Sincronizar Coleções (Acesso: Autenticado - Regra 3)
             const collectionsToSync = {
                 'radios': (data) => dbRadios = data,
                 'equipamentos': (data) => dbEquipamentos = data,
                 'registros': (data) => dbRegistros = data,
-                // NOVO: Coleção de usuários pendentes (visível para todos, mas usado apenas pelo admin)
-                'pending_approvals': (data) => pendingUsers = data, 
             };
 
             Object.keys(collectionsToSync).forEach(colName => {
-                // [CORREÇÃO] Usa appId hardcoded
                 const colPath = `artifacts/${appId}/public/data/${colName}`;
                 const q = query(collection(db, colPath));
                 
@@ -247,11 +479,31 @@
 
                 }, (error) => {
                     console.error(`Erro no listener de ${colName}:`, error);
-                    showModal('Erro de Sincronia', `Não foi possível carregar dados de ${colName}.`, 'error');
+                    showModal('Erro de Sincronia', `Não foi possível carregar dados de ${colName}. Verifique suas permissões.`, 'error');
                 });
                 firestoreListeners.push(unsub);
             });
             
+            // 2. Listener para Solicitações Pendentes (Acesso: Apenas Admin - Regra 1)
+            if (currentUser.role === 'admin') {
+                const pendingColPath = `artifacts/${appId}/public/data/pending_approvals`;
+                const qPending = query(collection(db, pendingColPath));
+
+                const unsubPending = onSnapshot(qPending, (querySnapshot) => {
+                    const data = [];
+                    querySnapshot.forEach((doc) => {
+                        data.push({ id: doc.id, ...doc.data() });
+                    });
+                    pendingUsers = data;
+                    if(isAuthReady) {
+                        renderApp();
+                    }
+                }, (error) => {
+                    console.error(`Erro no listener de pending_approvals:`, error);
+                });
+                firestoreListeners.push(unsubPending);
+            }
+
             // 3. Força renderização
             handleHashChange();
         }
@@ -261,6 +513,7 @@
             // [CORREÇÃO] Usa appId hardcoded
             const settingsDocRef = doc(db, "artifacts", appId, "public", "data", "settings", "config");
             try {
+                // A escrita aqui exige permissão de isAdminPrincipal() (Regra 2)
                 await setDoc(settingsDocRef, {	
                     letterMap: settings.letterMap,
                     nextIndex: settings.nextIndex,
@@ -268,7 +521,7 @@
                 }, { merge: true });
             } catch (e) {
                 console.error("Erro ao salvar 'settings/config':", e);
-                showModal('Erro', 'Não foi possível salvar as configurações no banco de dados.', 'error');
+                showModal('Erro', 'Não foi possível salvar as configurações no banco de dados. Verifique a permissão do Administrador Principal.', 'error');
             }
         }
         
@@ -287,6 +540,9 @@
                     radioPage = 1; equipamentoPage = 1; geralPage = 1;
                     radioSearch = ''; equipamentoSearch = ''; geralSearch = '';
                     focusedSearchInputId = null;	
+                    break;
+                case 'loginView':
+                    currentLoginView = value;
                     break;
                 case 'cadastroTab':
                     currentCadastroTab = value;
@@ -310,6 +566,20 @@
             } else {
                 renderApp();	
             }
+        }
+
+        // --- Funções de Paginação (NOVA CORREÇÃO) ---
+        function setRadioPage(delta) {
+            radioPage = Math.max(1, radioPage + delta);
+            renderApp();
+        }
+        function setEquipamentoPage(delta) {
+            equipamentoPage = Math.max(1, equipamentoPage + delta);
+            renderApp();
+        }
+        function setGeralPage(delta) {
+            geralPage = Math.max(1, geralPage + delta);
+            renderApp();
         }
         
         // --- Funções de Geração de Código ---
@@ -577,7 +847,7 @@
             const userUsername = usersFromDB[userIndex].username;
 
             // Bloqueia exclusão do admin principal
-            if (userUsername === 'monitoramentocoa1986@gmail.com') {
+            if (userUsername === ADMIN_PRINCIPAL_EMAIL) {
                 showModal('Bloqueado', 'O usuário principal (Admin) não pode ser excluído.', 'warning');
                 return;
             }
@@ -666,8 +936,70 @@
                 showModal('Erro', 'Não foi possível negar o acesso.', 'error');
             }
         }
+
+        // NOVO: Função para solicitar acesso
+        async function handleSolicitarAcesso(e) {
+            e.preventDefault();
+            
+            const form = e.target;
+            const nome = form['solicitar-name'].value.trim();
+            const email = form['solicitar-email'].value.trim();
+            const telefone = form['solicitar-phone'].value.trim();
+            const senhaProvisoria = form['solicitar-temp-password'].value.trim();
+
+            if (!nome || !email || !telefone || !senhaProvisoria) {
+                showModal('Erro', 'Todos os campos são obrigatórios.', 'error');
+                return;
+            }
+            if (!email.includes('@') || !email.includes('.')) {
+                showModal('Erro', 'Email inválido.', 'error');
+                return;
+            }
+
+            // 1. Verificar se o email já está aprovado
+            const appUser = settings.users.find(u => u.username === email);
+            if (appUser) {
+                showModal('Acesso Já Aprovado', 'Este email já possui um perfil aprovado. Tente o login.', 'info');
+                return;
+            }
+
+            // 2. Verificar se já existe uma solicitação pendente com este email
+            // [CORREÇÃO] Usa appId hardcoded
+            const pendingColRef = collection(db, `artifacts/${appId}/public/data/pending_approvals`);
+            const q = query(pendingColRef, where("email", "==", email));
+            const pendingSnap = await getDocs(q);
+            
+            if (!pendingSnap.empty) {
+                showModal('Solicitação Pendente', 'Este email já possui uma solicitação de acesso pendente. Aguarde a aprovação do administrador.', 'warning');
+                return;
+            }
+
+            try {
+                // 3. Envia a nova solicitação para o Firestore (Permissão permitida para qualquer usuário - Regra 1)
+                await addDoc(pendingColRef, {
+                    name: nome,
+                    email: email,
+                    phone: telefone,
+                    tempPassword: senhaProvisoria, // A senha provisória é apenas para referência do Admin
+                    createdAt: new Date().toISOString()
+                });
+
+                showModal('Solicitação Enviada', 
+                    `Sua solicitação de acesso foi enviada com sucesso para aprovação. Você será notificado após a análise.`, 
+                    'success');
+                
+                // Volta para a tela de login principal
+                form.reset();
+                updateState('loginView', 'login');
+            
+            } catch (error) {
+                console.error("Erro ao solicitar acesso:", error);
+                showModal('Erro', 'Ocorreu um erro ao enviar sua solicitação.', 'error');
+            }
+        }
         
         function renderPendingApprovalsModal() {
+            // Regra 1 permite apenas Admin Principal ler a coleção, mas vamos checar a role localmente
             if (currentUser.role !== 'admin') {
                 showModal('Acesso Negado', 'Apenas administradores podem visualizar as solicitações de acesso.', 'error');
                 return;
@@ -679,6 +1011,7 @@
                         <div>
                             <p class="font-semibold text-gray-800">${u.name}</p>
                             <p class="text-xs text-gray-500">${u.email}</p>
+                            <p class="text-xs text-gray-500">Telefone: ${u.phone || 'N/A'}</p>
                             <p class="text-xs text-gray-500">Solicitado em: ${new Date(u.createdAt).toLocaleDateString()} ${new Date(u.createdAt).toLocaleTimeString()}</p>
                         </div>
                         <div class="flex space-x-2">
@@ -704,7 +1037,7 @@
             modal.querySelector('div').classList.add('max-w-lg'); 
             
             messageEl.innerHTML = `
-                <p class="text-sm text-gray-600 mb-4">Novos usuários que tentaram o login com o Google aguardam sua aprovação.</p>
+                <p class="text-sm text-gray-600 mb-4">Novos usuários aguardam sua aprovação.</p>
                 <div class="max-h-80 overflow-y-auto space-y-3 p-2 bg-gray-50 rounded-lg border border-gray-200">
                     ${pendingListHTML}
                 </div>
@@ -847,9 +1180,11 @@
 
             const newRecords = [];
             let currentDb = collectionName === 'radios' ? dbRadios : dbEquipamentos;
+            let ignoredCount = 0;
 
             for (const item of data) {
                 let record = { createdAt: new Date().toISOString(), ativo: true };
+                let isDuplicate = false;
                 
                 if (collectionName === 'radios') {
                     const serie = item['Numero de Serie'] || item['Numero deSerie'] || item['serie'];
@@ -861,9 +1196,10 @@
                     record.modelo = String(modelo).trim();
                     record.status = 'Disponível';	
 
+                    // [CORREÇÃO] Checagem de duplicidade no cache local
                     if (currentDb.some(r => r.serie === record.serie)) {
                         console.warn(`Rádio duplicado (cache local): ${record.serie}. Ignorando.`);
-                        continue;	
+                        isDuplicate = true;
                     }
                     
                 } else if (collectionName === 'equipamentos') {
@@ -884,12 +1220,18 @@
                     record.subgrupo = String(subgrupo).trim();	
                     record.gestor = String(gestor).trim();
                     
+                    // [CORREÇÃO] Checagem de duplicidade no cache local
                     if (currentDb.some(r => r.frota === record.frota)) {
                         console.warn(`Equipamento duplicado (cache local): ${record.frota}. Ignorando.`);
-                        continue;	
+                        isDuplicate = true;
                     }
                 }
-                newRecords.push(record);
+
+                if (isDuplicate) {
+                    ignoredCount++;
+                } else {
+                    newRecords.push(record);
+                }
             }
 
             if (newRecords.length > 0) {
@@ -905,13 +1247,21 @@
 
                 try {
                     await batch.commit();
-                    showModal('Importação Concluída', `${newRecords.length} registros de ${collectionName} importados com sucesso.`, 'success');
+                    let msg = `${newRecords.length} registros de ${collectionName} importados com sucesso.`;
+                    if (ignoredCount > 0) {
+                        msg += `<br>(${ignoredCount} duplicatas ignoradas.)`;
+                    }
+                    showModal('Importação Concluída', msg, 'success');
                 } catch (error) {
                     console.error("Erro ao salvar importação em lote:", error);
                     showModal('Erro de Importação', 'Ocorreu um erro ao salvar os dados no banco de dados.', 'error');
                 }
             } else {
-                showModal('Importação', 'Nenhum registro novo válido foi encontrado no arquivo.', 'info');
+                let msg = 'Nenhum registro novo válido foi encontrado no arquivo.';
+                if (ignoredCount > 0) {
+                    msg += `<br>(${ignoredCount} duplicatas ignoradas.)`;
+                }
+                showModal('Importação', msg, 'info');
             }
         }
 
@@ -1006,10 +1356,11 @@
         
         function renderTopBar() {
             const allTabs = [
-                { id: 'dashboard', name: 'Dashboard', icon: 'fa-chart-line' },
-                { id: 'cadastro', name: 'Cadastro', icon: 'fa-box' },
-                { id: 'pesquisa', name: 'Pesquisa', icon: 'fa-search' },
-                { id: 'settings', name: 'Configurações', icon: 'fa-cog' }
+                // Corrigido para manter os nomes originais e IDs. A cor virá do CSS nth-child.
+                { id: 'dashboard', name: 'Dashboard', icon: 'fa-chart-line' }, // 1º child -> Azul
+                { id: 'cadastro', name: 'Cadastro', icon: 'fa-box' }, // 2º child -> Roxa
+                { id: 'pesquisa', name: 'Pesquisa', icon: 'fa-search' }, // 3º child -> Verde Água
+                { id: 'settings', name: 'Configurações', icon: 'fa-cog' } // 4º child -> Laranja
             ];
             
             const tabs = allTabs.filter(tab => {
@@ -1021,13 +1372,25 @@
             
             const tabLinks = tabs.map(tab => {
                 const isActive = currentPage === tab.id;
-                const activeClass = isActive ? 'text-green-main tab-active font-semibold' : 'text-gray-500 hover:text-green-main';
+                // 'checked' simula o estado ativo do radio button
+                const isChecked = isActive ? 'checked' : ''; 
                 
+                let iconClass = tab.icon;
+                if (tab.id === 'dashboard') iconClass = 'fa-chart-line';
+                else if (tab.id === 'cadastro') iconClass = 'fa-box';
+                else if (tab.id === 'pesquisa') iconClass = 'fa-search';
+                else if (tab.id === 'settings') iconClass = 'fa-cog';
+
+
                 return `
-                    <a href="#${tab.id}" class="py-3 px-4 flex items-center space-x-2 ${activeClass} transition-colors border-b-2 border-transparent">
-                        <i class="fas ${tab.icon}"></i>
-                        <span class="hidden sm:inline">${tab.name}</span>
-                    </a>
+                    <label class="radio-label" onclick="updateState('page', '${tab.id}')">
+                        <input type="radio" class="radio-input" name="main_nav_choice" ${isChecked} />
+                        <span class="radio-custom"></span>
+                        <span class="radio-text flex items-center space-x-1">
+                            <i class="fas ${iconClass} text-base"></i> 
+                            <span>${tab.name}</span>
+                        </span>
+                    </label>
                 `;
             }).join('');
 
@@ -1036,15 +1399,15 @@
                     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                         <div class="flex justify-between h-16 items-center">
                             
-                            <!-- Logo e Título (Mobile Centralizado, Desktop à Esquerda) -->
+                            <!-- Logo e Título -->
                             <div class="flex-1 flex justify-start items-center">
                                 <h1 class="text-xl font-bold text-gray-800 hidden sm:block">📻 Gestão de Rádios</h1>
                                 <h1 class="text-xl font-bold text-gray-800 block sm:hidden">📻 GR</h1>
                             </div>
 
-                            <!-- Nav Desktop Centralizada -->
-                            <nav class="hidden md:block mx-auto">
-                                <div class="flex space-x-4 border-b border-gray-200">
+                            <!-- Navegação Futurista Horizontal (Desktop) -->
+                            <nav class="hidden md:block mx-auto flex-none">
+                                <div class="radio-group-container border-b border-gray-200">
                                     ${tabLinks}
                                 </div>
                             </nav>
@@ -1076,10 +1439,23 @@
                         </div>
                     </div>
                 </header>
-                <!-- Nav Mobile -->
+                <!-- Nav Mobile (Manteve o padrão simples para mobile por praticidade) -->
                 <nav class="bg-white border-t border-gray-200 fixed bottom-0 left-0 right-0 z-10 md:hidden shadow-2xl">
                     <div class="flex justify-around">
-                        ${tabLinks.replace(/hidden sm:inline/g, '')}
+                        <!-- Reverte para links simples no mobile -->
+                        ${tabs.map(tab => {
+                            const isActive = currentPage === tab.id;
+                            const activeClass = isActive ? 'text-green-main tab-active font-semibold' : 'text-gray-500 hover:text-green-main';
+                            // Usando o nome original no mobile
+                            const mobileName = tab.name; 
+
+                            return `
+                                <a href="#${tab.id}" class="py-3 px-4 flex flex-col items-center space-y-1 ${activeClass} transition-colors border-b-2 border-transparent">
+                                    <i class="fas ${tab.icon}"></i>
+                                    <span class="text-xs">${mobileName}</span>
+                                </a>
+                            `;
+                        }).join('')}
                     </div>
                 </nav>
                 <div class="h-16 md:hidden"></div> <!-- Spacer for mobile nav -->
@@ -1087,66 +1463,126 @@
         }
         
         function renderLogin() {
+            // [NOVO] Recupera o email salvo
+            const savedEmail = localStorage.getItem('rememberedEmail') || '';
+            const rememberMeChecked = savedEmail ? 'checked' : '';
+            
+            let content;
+            if (currentLoginView === 'login') {
+                content = `
+                    <div class="text-center">
+                        <img src="https://usinapitangueiras.com.br/wp-content/uploads/2020/04/usina-pitangueiras-logo.png" alt="Logo Usina Pitangueiras"	
+                            class="mx-auto h-20 w-auto mb-4"	
+                            onerror="this.onerror=null; this.src='https://placehold.co/150x80/40800c/FFFFFF?text=Logo'; this.alt='Logo Placeholder'">
+                        <h2 class="text-3xl font-extrabold text-gray-900">
+                            Acesso ao Sistema
+                        </h2>
+                        <p class="mt-2 text-sm text-gray-600">
+                            Use seu email e senha para continuar
+                        </p>
+                    </div>
+                    <form id="login-form" class="mt-8 space-y-6">
+                        <input type="email" id="email" placeholder="Email (Acesso Interno)" required	
+                            class="appearance-none relative block w-full px-4 py-3 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-lg focus:outline-none focus:ring-green-main focus:border-green-main focus:z-10 sm:text-sm shadow-sm"
+                            value="${savedEmail}"
+                        >
+                        <div class="relative">
+                            <input type="password" id="password" placeholder="Senha" required	
+                                class="appearance-none relative block w-full px-4 py-3 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-lg focus:outline-none focus:ring-green-main focus:border-green-main focus:z-10 sm:text-sm shadow-sm pr-10"
+                                value=""
+                            >
+                            <button type="button" id="toggle-password" class="absolute inset-y-0 right-0 px-3 flex items-center text-gray-500 hover:text-gray-700 focus:outline-none" title="Mostrar/Ocultar Senha">
+                                <i id="toggle-password-icon" class="fas fa-eye"></i>
+                            </button>
+                        </div>
+                        
+                        <!-- NOVO: Checkbox Lembrar Email -->
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center">
+                                <input id="remember-me" name="remember-me" type="checkbox" ${rememberMeChecked}
+                                    class="h-4 w-4 text-green-main border-gray-300 rounded focus:ring-green-main">
+                                <label for="remember-me" class="ml-2 block text-sm text-gray-900">
+                                    Lembrar Email
+                                </label>
+                            </div>
+                        </div>
+
+                        <button type="submit"	
+                            class="group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-lg text-white bg-green-main hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-main transition-all shadow-md">
+                            <i class="fas fa-lock mr-2"></i>
+                            Entrar
+                        </button>
+                    </form>
+                    
+                    <!-- Botão Solicitar Acesso -->
+                    <button type="button" onclick="updateState('loginView', 'solicitar')"
+                        class="group relative w-full flex justify-center py-3 px-4 border border-gray-300 text-sm font-medium rounded-lg text-gray-700 bg-white hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-all shadow-md mt-4">
+                        <i class="fas fa-user-plus mr-2 text-indigo-500"></i>
+                        Solicitar Acesso
+                    </button>
+                `;
+            } else {
+                content = renderSolicitarAcesso();
+            }
+
             return `
                 <!-- Fundo escuro para visual futurístico -->
                 <div class="flex items-center justify-center min-h-screen bg-gray-900">
                     <div class="w-full max-w-md p-8 space-y-8 bg-white/95 backdrop-blur-sm rounded-xl shadow-2xl border border-green-main/30">
-                        <div class="text-center">
-                            <img src="https://usinapitangueiras.com.br/wp-content/uploads/2020/04/usina-pitangueiras-logo.png" alt="Logo Usina Pitangueiras"	
-                                class="mx-auto h-20 w-auto mb-4"	
-                                onerror="this.onerror=null; this.src='https://placehold.co/150x80/40800c/FFFFFF?text=Logo'; this.alt='Logo Placeholder'">
-                            <h2 class="text-3xl font-extrabold text-gray-900">
-                                Acesso ao Sistema
-                            </h2>
-                            <p class="mt-2 text-sm text-gray-600">
-                                Use seu email e senha para continuar
-                            </p>
-                        </div>
-                        <form id="login-form" class="mt-8 space-y-6">
-                            <input type="email" id="email" placeholder="Email (Acesso Interno)" required	
-                                class="appearance-none relative block w-full px-4 py-3 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-lg focus:outline-none focus:ring-green-main focus:border-green-main focus:z-10 sm:text-sm shadow-sm"
-                                value="monitoramentocoa1986@gmail.com"
-                            >
-                            <div class="relative">
-                                <input type="password" id="password" placeholder="Senha" required	
-                                    class="appearance-none relative block w-full px-4 py-3 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-lg focus:outline-none focus:ring-green-main focus:border-green-main focus:z-10 sm:text-sm shadow-sm pr-10"
-                                    value="tmotvini1986@#"
-                                >
-                                <button type="button" id="toggle-password" class="absolute inset-y-0 right-0 px-3 flex items-center text-gray-500 hover:text-gray-700 focus:outline-none" title="Mostrar/Ocultar Senha">
-                                    <i id="toggle-password-icon" class="fas fa-eye"></i>
-                                </button>
-                            </div>
-                            
-                            <button type="submit"	
-                                class="group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-lg text-white bg-green-main hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-main transition-all shadow-md">
-                                <i class="fas fa-lock mr-2"></i>
-                                Entrar (Interno)
-                            </button>
-                        </form>
-                        
-                        <!-- NOVO: Separador e Botão Google -->
-                        <div class="relative py-4">
-                            <div class="absolute inset-0 flex items-center">
-                                <div class="w-full border-t border-gray-300"></div>
-                            </div>
-                            <div class="relative flex justify-center text-sm">
-                                <span class="px-2 bg-white text-gray-500">
-                                    OU
-                                </span>
-                            </div>
-                        </div>
-
-                        <button type="button" onclick="handleGoogleLogin()"	
-                            class="group relative w-full flex justify-center py-3 px-4 border border-gray-300 text-sm font-medium rounded-lg text-gray-700 bg-white hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-all shadow-md">
-                            <i class="fab fa-google mr-2 text-indigo-500"></i>
-                            Entrar com Google
-                        </button>
-                        
+                        ${content}
                         <p class="text-xs text-center text-gray-500">
                             Usina Pitangueiras - "A ENERGIA QUE MOVE A REGIÃO"
                         </p>
                     </div>
                 </div>
+            `;
+        }
+
+        function renderSolicitarAcesso() {
+            return `
+                <div class="text-center">
+                    <h2 class="text-3xl font-extrabold text-gray-900">
+                        Solicitar Acesso
+                    </h2>
+                    <p class="mt-2 text-sm text-gray-600">
+                        Preencha seus dados para enviar a solicitação de perfil.
+                    </p>
+                </div>
+                <form id="form-solicitar-acesso" class="mt-8 space-y-4" onsubmit="handleSolicitarAcesso(event)">
+                    <div>
+                        <input type="text" name="solicitar-name" placeholder="Nome Completo" required	
+                            class="appearance-none relative block w-full px-4 py-3 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-lg focus:outline-none focus:ring-green-main focus:border-green-main sm:text-sm shadow-sm"
+                        >
+                    </div>
+                    <div>
+                        <input type="email" name="solicitar-email" placeholder="Email" required	
+                            class="appearance-none relative block w-full px-4 py-3 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-lg focus:outline-none focus:ring-green-main focus:border-green-main sm:text-sm shadow-sm"
+                        >
+                    </div>
+                    <div>
+                        <input type="tel" name="solicitar-phone" placeholder="Telefone (WhatsApp)" required	
+                            class="appearance-none relative block w-full px-4 py-3 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-lg focus:outline-none focus:ring-green-main focus:border-green-main sm:text-sm shadow-sm"
+                        >
+                    </div>
+                    <div>
+                        <input type="password" name="solicitar-temp-password" placeholder="Senha Provisória (Mín. 6 caracteres)" required minlength="6"	
+                            class="appearance-none relative block w-full px-4 py-3 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-lg focus:outline-none focus:ring-green-main focus:border-green-main sm:text-sm shadow-sm"
+                        >
+                        <p class="mt-1 text-xs text-gray-500 text-left">A senha provisória será usada para configurar seu acesso inicial.</p>
+                    </div>
+                    
+                    <button type="submit"	
+                        class="group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-lg text-white bg-indigo-500 hover:bg-indigo-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-all shadow-md">
+                        <i class="fas fa-paper-plane mr-2"></i>
+                        Enviar Solicitação
+                    </button>
+
+                    <button type="button" onclick="updateState('loginView', 'login')"
+                        class="group relative w-full flex justify-center py-2 px-4 border border-gray-300 text-sm font-medium rounded-lg text-gray-700 bg-white hover:bg-gray-100 transition-all shadow-sm mt-3">
+                        <i class="fas fa-arrow-left mr-2"></i>
+                        Voltar para Login
+                    </button>
+                </form>
             `;
         }
         
@@ -1186,7 +1622,7 @@
                     <path d="M12 2v6"></path>
                     <path d="M16 4h4a2 2 0 0 1 2 2v2M8 4H4a2 2 0 0 0-2 2v2"></path>
                     <path d="M20 12h2M2 12h2"></path>
-                    <path d="M18 16h4a2 2 0 0 1 2 2v2M6 16H2a2 0 0 0-2 2v2"></path>
+                    <path d="M18 16h4a2 2 0 0 1 2 2v2M6 16H2a2 2 0 0 0-2 2v2"></path>
                     <circle cx="12" cy="12" r="3" fill="#ffffff" stroke="none"></circle>
                     <path d="M12 15v7"></path>
                 </svg>
@@ -1269,22 +1705,24 @@
                 const count = groupCounts[group] || 0;
                 const letter = settings.letterMap[group] || 'N/A';	
                 return `
-                    <tr class="hover:bg-gray-50 border-b">
-                        <td class="px-6 py-3 whitespace-nowrap text-sm font-medium text-gray-900">
+                    <tr class="dashboard-table-row border-b">
+                        <td class="px-6 py-3 whitespace-nowrap text-sm font-medium text-gray-900 flex items-center justify-between">
                             ${group}	
                             <span class="text-xs font-semibold text-gray-400">(${letter})</span>
                         </td>
-                        <td class="px-6 py-3 whitespace-nowrap text-sm text-gray-700">${count}</td>
+                        <td class="px-6 py-3 whitespace-nowrap text-sm text-gray-700 font-bold">${count}</td>
                     </tr>
                 `;
             }).join('');
             
             const totalEquipamentos = dbRegistros.length;
 
+            // Removendo a DEMO dos rádio botões do Dashboard, pois eles foram movidos para a navegação
             return `
                 <div class="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
                     <!-- Título Centralizado -->
                     <h2 class="text-3xl font-bold text-gray-900 mb-6 text-center">Dashboard de Rádios e Frota</h2>
+
                     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
                         ${cardHtml}
                     </div>
@@ -1295,10 +1733,10 @@
                         </h3>
                         <div class="overflow-x-auto">
                             <table class="min-w-full divide-y divide-gray-200">
-                                <thead class="bg-gray-50">
+                                <thead class="bg-green-main/10">
                                     <tr>
-                                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Grupo</th>
-                                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Rádios Ativos</th>
+                                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider w-3/5">Grupo</th>
+                                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider w-2/5">Rádios Ativos</th>
                                     </tr>
                                 </thead>
                                 <tbody class="bg-white divide-y divide-gray-200">
@@ -1406,9 +1844,11 @@
             let radioPaginator = '';
             if (filteredRadios.length > PAGE_SIZE) {
                 radioPaginator = '<div class="flex justify-center items-center space-x-2 mt-4">';
-                radioPaginator += `<button ${radioPage === 1 ? 'disabled' : ''} onclick="radioPage--; renderApp();" class="px-2 py-1 text-sm rounded-md ${radioPage === 1 ? 'bg-gray-100 text-gray-400' : 'bg-gray-200 hover:bg-gray-300'}">Anterior</button>`;
+                // CORREÇÃO: Chama a função global
+                radioPaginator += `<button ${radioPage === 1 ? 'disabled' : ''} onclick="setRadioPage(-1)" class="px-2 py-1 text-sm rounded-md ${radioPage === 1 ? 'bg-gray-100 text-gray-400' : 'bg-gray-200 hover:bg-gray-300'}">Anterior</button>`;
                 radioPaginator += `<span class="text-sm font-medium text-gray-700">Pág ${radioPage} de ${totalRadioPages}</span>`;
-                radioPaginator += `<button ${radioPage === totalRadioPages ? 'disabled' : ''} onclick="radioPage++; renderApp();" class="px-2 py-1 text-sm rounded-md ${radioPage === totalRadioPages ? 'bg-gray-100 text-gray-400' : 'bg-gray-300 hover:bg-gray-400'}">Próxima</button>`;
+                // CORREÇÃO: Chama a função global
+                radioPaginator += `<button ${radioPage === totalRadioPages ? 'disabled' : ''} onclick="setRadioPage(1)" class="px-2 py-1 text-sm rounded-md ${radioPage === totalRadioPages ? 'bg-gray-100 text-gray-400' : 'bg-gray-300 hover:bg-gray-400'}">Próxima</button>`;
                 radioPaginator += '</div>';
             }
 
@@ -1446,10 +1886,16 @@
                                 </button>
                             </div>
                         </form>
-                        <input type="file" id="radio-import-file" accept=".csv, .xlsx" class="hidden" onchange="handleImport('radios', event)">
-                        <button onclick="document.getElementById('radio-import-file').click()" class="w-full mt-4 flex justify-center py-2 px-3 border border-transparent text-sm font-medium rounded-lg text-white bg-indigo-500 hover:bg-indigo-600 shadow-md">
-                            <i class="fas fa-upload mr-2"></i> Importar (csv, xlsx)
-                        </button>
+                        <div class="flex justify-between items-center mt-4">
+                            <input type="file" id="radio-import-file" accept=".csv, .xlsx, .xls" class="hidden" onchange="handleImport('radios', event)">
+                            <button onclick="document.getElementById('radio-import-file').click()" class="flex-1 flex justify-center py-2 px-3 border border-transparent text-sm font-medium rounded-lg text-white bg-indigo-500 hover:bg-indigo-600 shadow-md">
+                                <i class="fas fa-upload mr-2"></i> Importar (csv, xlsx)
+                            </button>
+                            <!-- NOVO: Botão de Informação de Importação -->
+                            <button onclick="showModal('Instruções de Importação - Rádio', RADIO_IMPORT_INFO, 'info')" class="ml-2 p-2 text-indigo-500 hover:text-indigo-700 transition-colors rounded-full" title="Instruções de arquivo">
+                                <i class="fas fa-info-circle"></i>
+                            </button>
+                        </div>
                     </div>
 
                     <!-- Tabela de Rádios -->
@@ -1471,7 +1917,35 @@
                                         <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Ações</th>
                                     </tr>
                                 </thead>
-                                <tbody class="bg-white divide-y divide-gray-200">${tableRows}</tbody>
+                                <tbody class="bg-white divide-y divide-gray-200">${paginatedRadios.map(r => {
+                                    const isAtivo = r.ativo !== false;
+                                    const rowClass = isAtivo ? 'hover:bg-gray-50 border-b' : 'hover:bg-red-50 border-b opacity-60 italic';
+                                    const statusText = isAtivo ? r.status || 'Disponível' : 'INATIVO';
+                                    const statusClass = isAtivo ? (r.status === 'Disponível' ? 'text-green-main' : (r.status === 'Manutenção' ? 'text-yellow-600' : 'text-blue-600')) : 'text-red-600';
+                                    return `
+                                        <tr class="${rowClass}">
+                                            <td class="px-4 py-2 text-sm text-gray-700 font-mono">${r.serie}</td>
+                                            <td class="px-4 py-2 text-sm text-gray-700">${r.modelo}</td>
+                                            <td class="px-4 py-2 text-sm font-semibold ${statusClass}">${statusText}</td>
+                                            <td class="px-4 py-2 whitespace-nowrap text-sm font-medium space-x-2">
+                                                <button onclick="loadRadioForEdit('${r.id}')" class="text-indigo-600 hover:text-indigo-900 p-1 rounded-full hover:bg-indigo-50" title="Editar Rádio">
+                                                    <i class="fas fa-edit"></i>
+                                                </button>
+                                                ${(() => {
+                                                    const actionText = isAtivo ? 'INATIVAR' : 'ATIVAR';
+                                                    const iconClass = isAtivo ? 'fa-toggle-on text-green-main' : 'fa-toggle-off text-gray-500'; 
+                                                    const btnClass = isAtivo ? 'hover:text-red-900' : 'hover:text-green-main';
+                                                    const title = isAtivo ? 'Inativar Rádio' : 'Ativar Rádio';
+                                                    return `
+                                                    <button onclick="showConfirmModal('Confirmar ${actionText}ÇÃO', 'Deseja realmente ${actionText} o Rádio ${r.serie}?', () => toggleRecordAtivo('radios', '${r.id}'))" class="${btnClass} p-1 rounded-full hover:bg-gray-100" title="${title}">
+                                                        <i class="fas ${iconClass} fa-lg"></i>
+                                                    </button>
+                                                    `;
+                                                })()}
+                                            </td>
+                                        </tr>
+                                    `;
+                                }).join('')}</tbody>
                             </table>
                         </div>
                         ${radioPaginator}
@@ -1546,9 +2020,11 @@
             let equipamentoPaginator = '';
             if (filteredEquipamentos.length > PAGE_SIZE) {
                 equipamentoPaginator = '<div class="flex justify-center items-center space-x-2 mt-4">';
-                equipamentoPaginator += `<button ${equipamentoPage === 1 ? 'disabled' : ''} onclick="equipamentoPage--; renderApp();" class="px-2 py-1 text-sm rounded-md ${equipamentoPage === 1 ? 'bg-gray-100 text-gray-400' : 'bg-gray-200 hover:bg-gray-300'}">Anterior</button>`;
+                // CORREÇÃO: Chama a função global
+                equipamentoPaginator += `<button ${equipamentoPage === 1 ? 'disabled' : ''} onclick="setEquipamentoPage(-1)" class="px-2 py-1 text-sm rounded-md ${equipamentoPage === 1 ? 'bg-gray-100 text-gray-400' : 'bg-gray-200 hover:bg-gray-300'}">Anterior</button>`;
                 equipamentoPaginator += `<span class="text-sm font-medium text-gray-700">Pág ${equipamentoPage} de ${totalEquipamentoPages}</span>`;
-                equipamentoPaginator += `<button ${equipamentoPage === totalEquipamentoPages ? 'disabled' : ''} onclick="equipamentoPage++; renderApp();" class="px-2 py-1 text-sm rounded-md ${equipamentoPage === totalEquipamentoPages ? 'bg-gray-100 text-gray-400' : 'bg-gray-300 hover:bg-gray-400'}">Próxima</button>`;
+                // CORREÇÃO: Chama a função global
+                equipamentoPaginator += `<button ${equipamentoPage === totalEquipamentoPages ? 'disabled' : ''} onclick="setEquipamentoPage(1)" class="px-2 py-1 text-sm rounded-md ${equipamentoPage === totalEquipamentoPages ? 'bg-gray-100 text-gray-400' : 'bg-gray-300 hover:bg-gray-400'}">Próxima</button>`;
                 equipamentoPaginator += '</div>';
             }
 
@@ -1596,10 +2072,16 @@
                                 </button>
                             </div>
                         </form>
-                        <input type="file" id="equipamento-import-file" accept=".csv, .xlsx" class="hidden" onchange="handleImport('equipamentos', event)">
-                        <button onclick="document.getElementById('equipamento-import-file').click()" class="w-full mt-4 flex justify-center py-2 px-3 border border-transparent text-sm font-medium rounded-lg text-white bg-indigo-500 hover:bg-indigo-600 shadow-md">
-                            <i class="fas fa-upload mr-2"></i> Importar (csv, xlsx)
-                        </button>
+                        <div class="flex justify-between items-center mt-4">
+                            <input type="file" id="equipamento-import-file" accept=".csv, .xlsx, .xls" class="hidden" onchange="handleImport('equipamentos', event)">
+                            <button onclick="document.getElementById('equipamento-import-file').click()" class="flex-1 flex justify-center py-2 px-3 border border-transparent text-sm font-medium rounded-lg text-white bg-indigo-500 hover:bg-indigo-600 shadow-md">
+                                <i class="fas fa-upload mr-2"></i> Importar (csv, xlsx)
+                            </button>
+                            <!-- NOVO: Botão de Informação de Importação -->
+                            <button onclick="showModal('Instruções de Importação - Equipamento', EQUIPAMENTO_IMPORT_INFO, 'info')" class="ml-2 p-2 text-indigo-500 hover:text-indigo-700 transition-colors rounded-full" title="Instruções de arquivo">
+                                <i class="fas fa-info-circle"></i>
+                            </button>
+                        </div>
                     </div>
                     <!-- Tabela de Equipamentos -->
                     <div class="lg:col-span-2">
@@ -1622,7 +2104,37 @@
                                         <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Ações</th>
                                     </tr>
                                 </thead>
-                                <tbody class="bg-white divide-y divide-gray-200">${tableRows}</tbody>
+                                <tbody class="bg-white divide-y divide-gray-200">${paginatedEquipamentos.map(e => {
+                                    const isAtivo = e.ativo !== false;
+                                    const rowClass = isAtivo ? 'hover:bg-gray-50 border-b' : 'hover:bg-red-50 border-b opacity-60 italic';
+                                    const frotaClass = isAtivo ? 'text-gray-700' : 'text-red-700';
+
+                                    return `
+                                        <tr class="${rowClass}">
+                                            <td class="px-4 py-2 text-sm ${frotaClass} font-mono">${e.frota} ${isAtivo ? '' : '(INATIVO)'}</td>
+                                            <td class="px-4 py-2 text-sm text-gray-700">${e.grupo}</td>
+                                            <td class="px-4 py-2 text-sm text-gray-700">${e.modelo}</td>
+                                            <td class="px-4 py-2 text-sm text-gray-700 hidden md:table-cell">${e.subgrupo || 'N/A'}</td>
+                                            <td class="px-4 py-2 text-sm text-gray-700 hidden lg:table-cell">${e.gestor || 'N/A'}</td>
+                                            <td class="px-4 py-2 whitespace-nowrap text-sm font-medium space-x-2">
+                                                <button onclick="loadEquipamentoForEdit('${e.id}')" class="text-indigo-600 hover:text-indigo-900 p-1 rounded-full hover:bg-indigo-50" title="Editar Equipamento">
+                                                    <i class="fas fa-edit"></i>
+                                                </button>
+                                                ${(() => {
+                                                    const actionText = isAtivo ? 'INATIVAR' : 'ATIVAR';
+                                                    const iconClass = isAtivo ? 'fa-toggle-on text-green-main' : 'fa-toggle-off text-gray-500';
+                                                    const btnClass = isAtivo ? 'hover:text-red-900' : 'hover:text-green-main';
+                                                    const title = isAtivo ? 'Inativar Equipamento' : 'Ativar Equipamento';
+                                                    return `
+                                                    <button onclick="showConfirmModal('Confirmar ${actionText}ÇÃO', 'Deseja realmente ${actionText} o Equipamento ${e.frota}?', () => toggleRecordAtivo('equipamentos', '${e.id}'))" class="${btnClass} p-1 rounded-full hover:bg-gray-100" title="${title}">
+                                                        <i class="fas ${iconClass} fa-lg"></i>
+                                                    </button>
+                                                    `;
+                                                })()}
+                                            </td>
+                                        </tr>
+                                    `;
+                                }).join('')}</tbody>
                             </table>
                         </div>
                         ${equipamentoPaginator}
@@ -1693,9 +2205,11 @@
             let geralPaginator = '';
             if (filteredRegistros.length > PAGE_SIZE) {
                 geralPaginator = '<div class="flex justify-center items-center space-x-2 mt-4">';
-                geralPaginator += `<button ${geralPage === 1 ? 'disabled' : ''} onclick="geralPage--; renderApp();" class="px-2 py-1 text-sm rounded-md ${geralPage === 1 ? 'bg-gray-100 text-gray-400' : 'bg-gray-200 hover:bg-gray-300'}">Anterior</button>`;
+                // CORREÇÃO: Chama a função global
+                geralPaginator += `<button ${geralPage === 1 ? 'disabled' : ''} onclick="setGeralPage(-1)" class="px-2 py-1 text-sm rounded-md ${geralPage === 1 ? 'bg-gray-100 text-gray-400' : 'bg-gray-200 hover:bg-gray-300'}">Anterior</button>`;
                 geralPaginator += `<span class="text-sm font-medium text-gray-700">Pág ${geralPage} de ${totalGeralPages}</span>`;
-                geralPaginator += `<button ${geralPage === totalGeralPages ? 'disabled' : ''} onclick="geralPage++; renderApp();" class="px-2 py-1 text-sm rounded-md ${geralPage === totalGeralPages ? 'bg-gray-100 text-gray-400' : 'bg-gray-300 hover:bg-gray-400'}">Próxima</button>`;
+                // CORREÇÃO: Chama a função global
+                geralPaginator += `<button ${geralPage === totalGeralPages ? 'disabled' : ''} onclick="setGeralPage(1)" class="px-2 py-1 text-sm rounded-md ${geralPage === totalGeralPages ? 'bg-gray-100 text-gray-400' : 'bg-gray-300 hover:bg-gray-400'}">Próxima</button>`;
                 geralPaginator += '</div>';
             }
 
@@ -1752,7 +2266,25 @@
                                         <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Ações</th>
                                     </tr>
                                 </thead>
-                                <tbody class="bg-white divide-y divide-gray-200">${tableRows}</tbody>
+                                <tbody class="bg-white divide-y divide-gray-200">${paginatedRegistros.map(reg => {
+                                    const r = radioMap[reg.radioId] || { serie: 'N/A', modelo: 'N/A' };
+                                    const e = equipamentoMap[reg.equipamentoId] || { frota: 'N/A', grupo: 'N/A', subgrupo: 'N/A', codigo: null };
+                                    const codigo = e.codigo || reg.codigo || 'N/A'; // Prioriza código do equipamento
+                                    return `
+                                        <tr class="hover:bg-gray-50 border-b">
+                                            <td class="px-4 py-2 text-sm text-gray-700 font-mono">${codigo}</td>
+                                            <td class="px-4 py-2 text-sm text-gray-700">${r.serie}</td>
+                                            <td class="px-4 py-2 text-sm text-gray-700">${e.frota}</td>
+                                            <td class="px-4 py-2 text-sm text-gray-700 hidden sm:table-cell">${e.grupo}</td>
+                                            <td class="px-4 py-2 text-sm text-gray-700 hidden md:table-cell">${e.subgrupo || 'N/A'}</td>
+                                            <td class="px-4 py-2 whitespace-nowrap text-sm font-medium">
+                                                <button onclick="showConfirmModal('Confirmar Desvinculação', 'Deseja realmente desvincular o Rádio ${r.serie} da Frota ${e.frota}?', () => deleteRecord('registros', '${reg.id}'))" class="text-red-600 hover:text-red-900 p-1 rounded-full hover:bg-red-50" title="Desvincular Rádio">
+                                                    <i class="fas fa-unlink"></i> Desvincular
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    `;
+                                }).join('')}</tbody>
                             </table>
                         </div>
                         ${geralPaginator}
@@ -1769,9 +2301,13 @@
                     id: reg.id,	
                     codigo: e.codigo || reg.codigo, // Prioriza código do equipamento
                     serie: r.serie || 'N/A',
-                    modeloRadio: r.modelo || 'N/A', frota: e.frota || 'N/A',
-                    grupo: e.grupo || 'N/A', subgrupo: e.subgrupo || 'N/A',
-                    gestor: e.gestor || 'N/A', createdAt: reg.createdAt
+                    modeloRadio: r.modelo || 'N/A', 
+                    frota: e.frota || 'N/A',
+                    modeloEquipamento: e.modelo || 'N/A',
+                    grupo: e.grupo || 'N/A', 
+                    subgrupo: e.subgrupo || 'N/A',
+                    gestor: e.gestor || 'N/A', 
+                    createdAt: reg.createdAt
                 };
             });
             
@@ -1788,17 +2324,21 @@
                     (r.frota || '').toLowerCase().includes(searchTerm) ||
                     (r.grupo || '').toLowerCase().includes(searchTerm) ||
                     (r.subgrupo || '').toLowerCase().includes(searchTerm) ||
-                    (r.gestor || '').toLowerCase().includes(searchTerm)
+                    (r.gestor || '').toLowerCase().includes(searchTerm) ||
+                    (r.modeloEquipamento || '').toLowerCase().includes(searchTerm)
                 );
             }
             
+            // CORREÇÃO: Colunas separadas para melhor legibilidade
             const tableRows = filteredRecords.map(r => `
                 <tr class="hover:bg-gray-50 border-b">
-                    <td class="px-4 py-2 text-sm font-semibold text-gray-900 font-mono">${r.codigo}</td>
-                    <td class="px-4 py-2 text-sm text-gray-700">${r.frota} / ${r.grupo}</td>
-                    <td class="px-4 py-2 text-sm text-gray-700 hidden sm:table-cell">${r.serie} / ${r.modeloRadio}</td>
-                    <td class="px-4 py-2 text-sm text-gray-700 hidden md:table-cell">${r.subgrupo}</td>
-                    <td class="px-4 py-2 text-sm text-gray-700 hidden lg:table-cell">${r.gestor}</td>
+                    <td class="px-3 py-2 text-sm font-semibold text-gray-900 font-mono">${r.codigo}</td>
+                    <td class="px-3 py-2 text-sm text-gray-700">${r.frota}</td>
+                    <td class="px-3 py-2 text-sm text-gray-700">${r.grupo}</td>
+                    <td class="px-3 py-2 text-sm text-gray-700">${r.serie}</td>
+                    <td class="px-3 py-2 text-sm text-gray-700 hidden sm:table-cell">${r.modeloRadio}</td>
+                    <td class="px-3 py-2 text-sm text-gray-700 hidden md:table-cell">${r.subgrupo}</td>
+                    <td class="px-3 py-2 text-sm text-gray-700 hidden lg:table-cell">${r.gestor}</td>
                 </tr>
             `).join('');
 
@@ -1824,11 +2364,13 @@
                             <table class="min-w-full divide-y divide-gray-200">
                                 <thead class="bg-gray-50">
                                     <tr>
-                                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Código</th>
-                                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Equipamento (Frota/Grupo)</th>
-                                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase hidden sm:table-cell">Rádio (Série/Modelo)</th>
-                                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase hidden md:table-cell">Subgrupo</th>
-                                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase hidden lg:table-cell">Gestor</th>
+                                        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Código</th>
+                                        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Frota</th>
+                                        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Grupo</th>
+                                        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Série</th>
+                                        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase hidden sm:table-cell">Modelo Rádio</th>
+                                        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase hidden md:table-cell">Subgrupo</th>
+                                        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase hidden lg:table-cell">Gestor</th>
                                     </tr>
                                 </thead>
                                 <tbody class="bg-white divide-y divide-gray-200">${tableRows}</tbody>
@@ -2015,7 +2557,7 @@
             settings.users = usersFromDB;	
 
             const tableRows = usersFromDB.map(u => {
-                const isMainAdmin = u.username === 'monitoramentocoa1986@gmail.com';
+                const isMainAdmin = u.username === ADMIN_PRINCIPAL_EMAIL;
                 const isCurrent = currentUser.email === u.username;
                 const canEditDelete = !isMainAdmin;
 
@@ -2136,9 +2678,17 @@
             e.preventDefault();
             const emailInput = document.getElementById('email');
             const passwordInput = document.getElementById('password');
+            const rememberMeCheckbox = document.getElementById('remember-me');
             const email = emailInput.value;
             const password = passwordInput.value;
             
+            // [NOVO] Salvar/Remover Email no localStorage
+            if (rememberMeCheckbox.checked) {
+                localStorage.setItem('rememberedEmail', email);
+            } else {
+                localStorage.removeItem('rememberedEmail');
+            }
+
             isLoggingIn = true;
             renderApp();	
 
@@ -2162,100 +2712,17 @@
             }
         }
         
-        // NOVO: Login com Google
-        async function handleGoogleLogin() {
-            if (!db || !appId) {
-                showModal('Erro', 'Conexão com o banco de dados perdida.', 'error');
-                return;
-            }
-            
-            isLoggingIn = true;
-            renderApp();	
-
-            const provider = new GoogleAuthProvider();
-            try {
-                const result = await signInWithPopup(auth, provider);
-                const user = result.user;
-                const email = user.email;
-                const name = user.displayName || 'Usuário Google';
-
-                // 1. Verificar se o usuário já existe na lista de perfis APROVADOS no Firestore
-                const appUser = await fetchAppUserProfile(email);
-
-                if (appUser) {
-                    // Usuário aprovado, o setupAuthListener cuida da continuidade.
-                    showModal('Sucesso!', `Bem-vindo de volta, ${appUser.name}!`, 'success');
-                } else {
-                    // 2. Usuário novo ou não aprovado. Precisa entrar na fila de pendências.
-                    
-                    // 2a. Checar se já está na fila de pendências
-                    // [CORREÇÃO] Usa appId hardcoded
-                    const pendingColRef = collection(db, `artifacts/${appId}/public/data/pending_approvals`);
-                    const q = query(pendingColRef, where("email", "==", email));
-                    const pendingSnap = await getDocs(q);
-                    
-                    if (pendingSnap.empty) {
-                        // 2b. Se não estiver pendente, adiciona
-                        await addDoc(pendingColRef, {
-                            email: email,
-                            name: name,
-                            createdAt: new Date().toISOString()
-                        });
-                        console.log(`Usuário ${email} adicionado à lista de pendências.`);
-                    }
-
-                    // 2c. Desloga o usuário do Firebase Auth (para que não acesse nada antes de ser aprovado)
-                    await signOut(auth);
-                    
-                    isLoggingIn = false;
-                    renderApp();
-
-                    showModal('Acesso Pendente', 
-                        `Bem-vindo, ${name}! Seu acesso foi registrado, mas precisa ser aprovado por um administrador. Tente logar novamente após a aprovação.`, 
-                        'info');
-                }
-            } catch (error) {
-                isLoggingIn = false;
-                renderApp();
-                
-                let msg = 'Ocorreu um erro desconhecido durante o login com o Google.';
-                if (error.code === 'auth/popup-closed-by-user') {
-                    msg = 'A janela de login foi fechada. Tente novamente.';
-                } else if (error.code === 'auth/cancelled-popup-request') {
-                    msg = 'O pop-up de login foi cancelado.';
-                } else if (error.code === 'auth/account-exists-with-different-credential') {
-                    msg = 'Já existe uma conta com este email, mas usando credenciais diferentes (tente email/senha).';
-                }
-                console.error("Erro no login com Google:", error.code, error.message);
-                showModal('Erro de Login Google', msg, 'error');
-            }
-        }
-
-
         async function fetchAppUserProfile(email) {
             if (!db || !appId) return null;
             
-            // [CORREÇÃO] Usa appId hardcoded
-            const settingsDocRef = doc(db, "artifacts", appId, "public", "data", "settings", "config");
-            try {
-                const settingsSnap = await getDoc(settingsDocRef);
-                if (settingsSnap.exists()) {
-                    const allUsers = settingsSnap.data().users || [];
-                    settings.users = allUsers;	
-                    const appUser = allUsers.find(u => u.username === email);	
-                    return appUser || null;
-                } else {
-                    console.error("'settings/config' não encontrado.");
-                    return null;
-                }
-            } catch (e) {
-                console.error("Erro ao buscar perfil de usuário:", e);
-                return null;
-            }
+            // [CORREÇÃO] Apenas retorna o perfil da lista pré-carregada ou recarrega.
+            const appUser = settings.users.find(u => u.username === email);	
+            return appUser || null;
         }
 
         function attachLoginEvents() {
             const form = document.getElementById('login-form');
+            const solicitacaoForm = document.getElementById('form-solicitar-acesso');
             const passwordInput = document.getElementById('password');
             const togglePasswordButton = document.getElementById('toggle-password');
             const togglePasswordIcon = document.getElementById('toggle-password-icon');
@@ -2277,7 +2744,10 @@
                     });
                 }
             }
-            // Não precisa de evento separado para Google, pois ele usa `onclick` diretamente.
+            // Anexar evento do novo formulário
+            if (solicitacaoForm) {
+                solicitacaoForm.onsubmit = handleSolicitarAcesso;
+            }
         }
 
         function attachCadastroEvents() {
@@ -2635,7 +3105,7 @@
             
             const user = usersFromDB[userIndex];
             
-            if (user.username === 'monitoramentocoa1986@gmail.com') {	
+            if (user.username === ADMIN_PRINCIPAL_EMAIL) {	
                 showModal('Permissões Fixas', 'As permissões do usuário Administrador principal são fixas e não podem ser alteradas.', 'warning');
                 return;
             }
@@ -2760,37 +3230,62 @@
         }
         
         function setupAuthListener() {
-            onAuthStateChanged(auth, async (user) => {
-                if (user) {
-                    userId = user.uid;
-                    const appUser = await fetchAppUserProfile(user.email);
-                    
-                    if (appUser) {
-                        // Usuário aprovado no Firestore, loga no App.
-                        currentUser = { ...appUser, uid: user.uid, email: user.email };
-                        isAuthReady = true;
-                        isLoggingIn = false;	
-                        await attachFirestoreListeners();	
-                    } else {
-                        // Usuário logado no Firebase Auth, mas sem perfil no Firestore (não aprovado).
-                        if (auth.currentUser) await signOut(auth); // Garante que ele é deslogado
+            // [NOVO] Carrega as configurações antes de checar o estado de autenticação para ter a lista de usuários
+            loadInitialSettings().then(() => {
+                onAuthStateChanged(auth, async (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        // Usa a lista de settings.users que já foi pré-carregada
+                        let appUser = settings.users.find(u => u.username === user.email);
                         
-                        showModal('Acesso Não Autorizado', 'Seu perfil não foi encontrado ou não está autorizado. Se você fez login com Google, aguarde a aprovação do administrador.', 'error');
-                        isAuthReady = true;	
+                        // [SOLUÇÃO DE CONTINGÊNCIA] Se for o Admin principal, forçamos a criação/uso do perfil Admin.
+                        if (!appUser && user.email === ADMIN_PRINCIPAL_EMAIL) {
+                            appUser = { 
+                                id: user.uid, 
+                                name: "Juliano Timoteo (Admin Principal)", 
+                                username: ADMIN_PRINCIPAL_EMAIL, 
+                                role: "admin",
+                                permissions: { dashboard: true, cadastro: true, pesquisa: true, settings: true }
+                            };
+                            // Adiciona o perfil à lista em memória e tenta salvar 
+                            if (!settings.users.some(u => u.username === ADMIN_PRINCIPAL_EMAIL)) {
+                                settings.users.push(appUser);
+                                saveSettings();
+                            }
+                        }
+
+                        if (appUser) {
+                            // Usuário aprovado no Firestore, loga no App.
+                            currentUser = { ...appUser, uid: user.uid, email: user.email };
+                            isAuthReady = true;
+                            isLoggingIn = false;	
+                            await attachFirestoreListeners();	
+                        } else {
+                            // Usuário autenticado, mas sem perfil no Firestore (não aprovado).
+                            if (user.email) {
+                                showModal('Acesso Não Autorizado', `Seu perfil (${user.email}) foi autenticado, mas não possui acesso aprovado no sistema. Contate um administrador.`, 'error');
+                            } else {
+                                showModal('Erro', 'Falha na autenticação do perfil de acesso. Contate o suporte.', 'error');
+                            }
+                            
+                            if (auth.currentUser) await signOut(auth); // Desloga o usuário
+                            
+                            isAuthReady = true;	
+                            isLoggingIn = false;
+                            updateState('page', 'login');
+                        }
+                    } else {
+                        currentUser = null;
+                        userId = null;
+                        isAuthReady = true;
                         isLoggingIn = false;
-                        updateState('page', 'login');
+                        detachFirestoreListeners();	
+                        dbRadios = []; dbEquipamentos = []; dbRegistros = [];
+                        // Volta para a tela de login principal por padrão
+                        updateState('loginView', 'login'); 
+                        renderApp();	
                     }
-                } else {
-                    currentUser = null;
-                    userId = null;
-                    isAuthReady = true;
-                    isLoggingIn = false;
-                    detachFirestoreListeners();	
-                    dbRadios = []; dbEquipamentos = []; dbRegistros = [];
-                    // NÃO CHAMA updateState('page', 'login') aqui, pois ele já pode ter sido chamado
-                    // pela lógica de aprovação pendente. Apenas força a renderização.
-                    renderApp();	
-                }
+                });
             });
         }
 
@@ -2806,7 +3301,8 @@
                 db = getFirestore(app);
                 setLogLevel('info');	
                 
-                setupAuthListener();
+                // [CORREÇÃO] O setupAuthListener agora chama loadInitialSettings antes do onAuthStateChanged
+                setupAuthListener(); 
 
             } catch (e) {
                 console.error("Erro crítico ao inicializar Firebase:", e);
@@ -2917,9 +3413,19 @@
         window.loadUserForEdit = loadUserForEdit;
         window.deleteUser = deleteUser;
 
-        // NOVO: Login Google e Pendências
-        window.handleGoogleLogin = handleGoogleLogin;
+        // Funções de Paginação
+        window.setRadioPage = setRadioPage;
+        window.setEquipamentoPage = setEquipamentoPage;
+        window.setGeralPage = setGeralPage;
+
+        // NOVO: Solicitar Acesso
+        window.handleSolicitarAcesso = handleSolicitarAcesso; // Exportado para uso no formulário de solicitação
         
+        // NOVO: Informações de Importação
+        window.RADIO_IMPORT_INFO = RADIO_IMPORT_INFO;
+        window.EQUIPAMENTO_IMPORT_INFO = EQUIPAMENTO_IMPORT_INFO;
+
+
         window.onload = initApp;
 
     </script>

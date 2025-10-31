@@ -31,6 +31,47 @@ html { font-family: 'Inter', 'sans-serif'; }
     box-shadow: 0 10px 15px rgba(0, 0, 0, 0.1), inset 0 0 12px var(--green-alpha);
 }
 
+/* ------------------------------------------------ */
+/* 🌟 CORREÇÃO DARK MODE DASHBOARD/TABELA 🌟 */
+/* ------------------------------------------------ */
+
+/* Estilo para a tabela de resumo do Dashboard - CLARO */
+.dashboard-table-row {
+    transition: background-color 0.2s ease;
+}
+.dashboard-table-row:nth-child(even) {
+    background-color: #f9f9f9; /* Linhas pares (claro) */
+}
+.dashboard-table-row:hover {
+    background-color: #f0fdf4; /* Cor de hover suave (claro) */
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+/* Estilo para a tabela de resumo do Dashboard - ESCURO */
+:root.dark .dashboard-table-row {
+    /* Reseta o fundo para o fundo do card (gray-800) */
+    background-color: transparent; 
+}
+
+:root.dark .dashboard-table-row:nth-child(even) {
+    /* Linha par no Dark Mode: Um fundo sutilmente mais escuro (gray-900) para contraste */
+    background-color: #1f2937; 
+}
+
+:root.dark .dashboard-table-row:hover {
+    /* Hover no Dark Mode: Um cinza mais claro (gray-700) */
+    background-color: #374151; 
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+/* 🌟 CORREÇÃO: Força o texto do cabeçalho da tabela para ser legível no Dark Mode */
+:root.dark .bg-green-main\/10 { 
+    background-color: #40800c40; /* Verde principal com 40% de opacidade no dark (dark:bg-green-main/40) */
+}
+/* ------------------------------------------------ */
+/* ------------------------------------------------ */
+
+
 /* Animação para o texto de loading */
 .loading-text-animate {
     animation: pulse-text 1.5s infinite ease-in-out;
@@ -112,20 +153,6 @@ html { font-family: 'Inter', 'sans-serif'; }
     border-radius: 50%;
     transform: scale(0);
     transition: all 0.3s cubic-bezier(0.23, 1, 0.32, 1);
-}
-
-.radio-custom::after {
-    /* O anel de órbita será mantido para o efeito visual moderno */
-    content: "";
-    position: absolute;
-    width: 30px; /* Reduzido */
-    height: 30px;
-    border: 2px solid transparent;
-    border-radius: 50%;
-    border-top-color: #00a6ff;
-    opacity: 0;
-    transform: scale(0.8);
-    transition: all 0.4s ease;
 }
 
 .radio-custom::after {
@@ -246,18 +273,6 @@ html { font-family: 'Inter', 'sans-serif'; }
     }
 }
 /* --- FIM ESTILOS DE RADIO BUTTON FUTURISTA --- */
-
-/* Estilo para a tabela de resumo do Dashboard */
-.dashboard-table-row {
-    transition: background-color 0.2s ease;
-}
-.dashboard-table-row:nth-child(even) {
-    background-color: #f9f9f9;
-}
-.dashboard-table-row:hover {
-    background-color: #f0fdf4; /* Cor de hover suave */
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
-}
 
 /* [CORREÇÃO] Estilo para evitar quebra de linha feia em texto longo (como email) */
 .break-words-all {

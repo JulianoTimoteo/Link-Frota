@@ -55,17 +55,20 @@ let currentLoginView = 'login'; // 'login' ou 'solicitar'
 let currentCadastroTab = 'radio';
 let currentSettingTab = 'system'; 
 let isLoggingIn = false;
+// 🌟 NOVO: Aumentado de 6 para 10
+const PAGE_SIZE = 10; 
 // NOVO: Armazena usuários aguardando aprovação
 let pendingUsers = [];
 // 🌟 NOVO: Armazena duplicidades críticas
 let duplicities = [];
 
 // Paginação e Busca
-let radioPage = 1, equipamentoPage = 1, geralPage = 1;
-const PAGE_SIZE = 6;
+let radioPage = 1, equipamentoPage = 1, geralPage = 1, pesquisaPage = 1; // 🌟 NOVO: paginação para pesquisa
+const PESQUISA_PAGE_SIZE = 10; // 🌟 NOVO: Tamanho fixo para pesquisa
 let radioSearch = '', equipamentoSearch = '', geralSearch = '';
 let focusedSearchInputId = null;
 let searchCursorPosition = 0;
+let searchTermPesquisa = ''; // 🌟 NOVO: Termo de busca da aba Pesquisa
 
 // Constantes de Configuração
 const GROUPS = ['Colheita', 'Transporte', 'Oficina', 'TPL', 'Industria'];
@@ -260,7 +263,9 @@ async function attachFirestoreListeners() {
             checkDuplicities();
             
             if(isAuthReady) {
-                renderApp();
+                // A renderização principal agora é gerenciada pelo splash screen
+                // Se não estiver logando, renderiza imediatamente
+                if(!isLoggingIn) renderApp();
             }
 
         }, (error) => {
@@ -282,7 +287,7 @@ async function attachFirestoreListeners() {
             });
             pendingUsers = data;
             if(isAuthReady) {
-                renderApp();
+                if(!isLoggingIn) renderApp();
             }
         }, (error) => {
             console.error(`Erro no listener de pending_approvals:`, error);
@@ -322,8 +327,8 @@ function updateState(key, value) {
             currentPage = value;
             currentCadastroTab = 'radio';	
             currentSettingTab = 'system';
-            radioPage = 1; equipamentoPage = 1; geralPage = 1;
-            radioSearch = ''; equipamentoSearch = ''; geralSearch = '';
+            radioPage = 1; equipamentoPage = 1; geralPage = 1; pesquisaPage = 1; // Reset da paginação
+            radioSearch = ''; equipamentoSearch = ''; geralSearch = ''; searchTermPesquisa = ''; // Reset da busca
             focusedSearchInputId = null;	
             break;
         case 'loginView':
@@ -364,6 +369,11 @@ function setEquipamentoPage(delta) {
 }
 function setGeralPage(delta) {
     geralPage = Math.max(1, geralPage + delta);
+    renderApp();
+}
+// 🌟 NOVO: Paginação para a aba Pesquisa
+function setPesquisaPage(delta) {
+    pesquisaPage = Math.max(1, pesquisaPage + delta);
     renderApp();
 }
 
@@ -1024,7 +1034,7 @@ function renderDuplicityModalContent() {
                 (item.collection === 'equipamentos' && reg.equipamentoId === item.id)
             );
             const actionButton = isLinked 
-                ? `<span class="text-xs font-semibold text-red-500 bg-red-100 px-2 py-1 rounded-full">EM USO</span>`
+                ? `<span class="text-xs font-semibold text-red-500 bg-red-100 dark:bg-red-800/50 dark:text-red-300 px-2 py-1 rounded-full">EM USO</span>`
                 : `<button onclick="deleteDuplicityWrapper('${item.collection}', '${item.id}', '${item.value}')" class="px-3 py-1 text-xs bg-red-500 text-white rounded-lg hover:bg-red-600 shadow-md transition-colors">
                     Remover Este
                    </button>`;
@@ -1908,6 +1918,7 @@ function renderCadastroGeral() {
     );
     
     const radioOptions = availableRadios
+        // 🌟 NOVO: Exibe o Modelo do Rádio no select
         .map(r => `<option value="${r.id}">${r.serie} (${r.modelo})</option>`)
         .join('');
     const frotaOptions = availableEquipamentos
@@ -1970,7 +1981,7 @@ function renderCadastroGeral() {
                     <div>
                         <label for="geral-radio-id" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Número de Série (Rádio) <span class="text-red-500">*</span></label>
                         <select id="geral-radio-id" required class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-green-main focus:ring-green-main p-2 border bg-white dark:bg-gray-700 dark:text-gray-100">
-                            <option value="">Selecione um Rádio Disponível</option>
+                            <option value="">Selecione um Rádio Disponível (Série/Modelo)</option>
                             ${radioOptions}
                         </select>
                         <p id="radio-modelo-info" class="mt-1 text-xs text-gray-500 dark:text-gray-400"></p>
@@ -2041,12 +2052,16 @@ function renderCadastroGeral() {
 }
 
 function renderPesquisa() {
+    const radioMap = dbRadios.reduce((acc, r) => { acc[r.id] = r; return acc; }, {});
+    const equipamentoMap = dbEquipamentos.reduce((acc, e) => { acc[e.id] = e; return acc; }, {});
+    
+    // 1. Processa e filtra todos os registros ativos (junção de dados)
     const allRecords = dbRegistros.map(reg => {
         const r = dbRadios.find(r => r.id === reg.radioId) || {};
         const e = dbEquipamentos.find(e => e.id === reg.equipamentoId) || {};
         return {
             id: reg.id,	
-            codigo: e.codigo || reg.codigo, // Prioriza código do equipamento
+            codigo: e.codigo || reg.codigo,
             serie: r.serie || 'N/A',
             modeloRadio: r.modelo || 'N/A', 
             frota: e.frota || 'N/A',
@@ -2059,9 +2074,7 @@ function renderPesquisa() {
     });
     
     let filteredRecords = allRecords;
-    const searchInputElement = document.getElementById('search-term');
-    const currentSearchTerm = searchInputElement ? searchInputElement.value : (window._searchTermTemp || '');	
-    const searchTerm = currentSearchTerm.toLowerCase();
+    const searchTerm = searchTermPesquisa.toLowerCase(); // Usa o termo global
 
     if (searchTerm) {
         filteredRecords = allRecords.filter(r =>	
@@ -2076,18 +2089,44 @@ function renderPesquisa() {
         );
     }
     
-    // CORREÇÃO: Colunas separadas para melhor legibilidade
-    const tableRows = filteredRecords.map(r => `
-        <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/50 border-b dark:border-gray-700">
-            <td class="px-3 py-2 text-sm font-semibold text-gray-900 dark:text-gray-100 font-mono">${r.codigo}</td>
-            <td class="px-3 py-2 text-sm text-gray-700 dark:text-gray-300">${r.frota}</td>
-            <td class="px-3 py-2 text-sm text-gray-700 dark:text-gray-300">${r.grupo}</td>
-            <td class="px-3 py-2 text-sm text-gray-700 dark:text-gray-300">${r.serie}</td>
-            <td class="px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hidden sm:table-cell">${r.modeloRadio}</td>
-            <td class="px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hidden md:table-cell">${r.subgrupo}</td>
-            <td class="px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hidden lg:table-cell">${r.gestor}</td>
-        </tr>
-    `).join('');
+    // 2. Paginação
+    const totalPesquisaPages = Math.ceil(filteredRecords.length / PESQUISA_PAGE_SIZE);
+    pesquisaPage = Math.min(pesquisaPage, totalPesquisaPages) || 1;
+    const paginatedRecords = filteredRecords.slice((pesquisaPage - 1) * PESQUISA_PAGE_SIZE, pesquisaPage * PESQUISA_PAGE_SIZE);
+    
+    let tableRows = '';
+    if (paginatedRecords.length > 0) {
+        // CORREÇÃO: Colunas separadas para melhor legibilidade
+        tableRows = paginatedRecords.map(r => `
+            <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/50 border-b dark:border-gray-700">
+                <td class="px-3 py-2 text-sm font-semibold text-gray-900 dark:text-gray-100 font-mono">${r.codigo}</td>
+                <td class="px-3 py-2 text-sm text-gray-700 dark:text-gray-300">${r.frota}</td>
+                <td class="px-3 py-2 text-sm text-gray-700 dark:text-gray-300">${r.grupo}</td>
+                <td class="px-3 py-2 text-sm text-gray-700 dark:text-gray-300">${r.serie}</td>
+                <td class="px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hidden sm:table-cell">${r.modeloRadio}</td>
+                <td class="px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hidden md:table-cell">${r.subgrupo}</td>
+                <td class="px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hidden lg:table-cell">${r.gestor}</td>
+            </tr>
+        `).join('');
+    } else {
+        // 🌟 CORREÇÃO: Mensagem em Português
+        tableRows = `
+            <tr>
+                <td colspan="7" class="px-4 py-4 text-center text-gray-500 dark:text-gray-400 italic">
+                    Nenhum registro ativo encontrado.
+                </td>
+            </tr>
+        `;
+    }
+
+    let pesquisaPaginator = '';
+    if (filteredRecords.length > PESQUISA_PAGE_SIZE) {
+        pesquisaPaginator = '<div class="flex justify-center items-center space-x-2 mt-4">';
+        pesquisaPaginator += `<button ${pesquisaPage === 1 ? 'disabled' : ''} onclick="setPesquisaPage(-1)" class="px-2 py-1 text-sm rounded-md ${pesquisaPage === 1 ? 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500' : 'bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500 text-gray-700 dark:text-gray-100'}">Anterior</button>`;
+        pesquisaPaginator += `<span class="text-sm font-medium text-gray-700 dark:text-gray-300">Pág ${pesquisaPage} de ${totalPesquisaPages}</span>`;
+        pesquisaPaginator += `<button ${pesquisaPage === totalPesquisaPages ? 'disabled' : ''} onclick="setPesquisaPage(1)" class="px-2 py-1 text-sm rounded-md ${pesquisaPage === totalPesquisaPages ? 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500' : 'bg-gray-300 dark:bg-gray-600 hover:bg-gray-400 dark:hover:bg-gray-500 text-gray-700 dark:text-gray-100'}">Próxima</button>`;
+        pesquisaPaginator += '</div>';
+    }
 
 
     return `
@@ -2096,8 +2135,8 @@ function renderPesquisa() {
             <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
                 <div class="mb-4 flex space-x-2">
                     <input type="text" id="search-term" placeholder="Buscar por Código, Série, Frota, Subgrupo..."	
-                        value="${currentSearchTerm}"	
-                        oninput="handleSearchInput(this, '_searchTermTemp')"
+                        value="${searchTermPesquisa}"	
+                        oninput="handleSearchInput(this, 'searchTermPesquisa', 1)"
                         class="flex-1 rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-green-main focus:ring-green-main p-2 border dark:bg-gray-700 dark:text-gray-100"
                     >
                     <button id="search-button" onclick="document.getElementById('search-term').dispatchEvent(new Event('input'))" class="py-2 px-3 border border-transparent text-sm font-medium rounded-lg text-white bg-green-main hover:bg-green-700 shadow-md" title="Iniciar Busca">
@@ -2122,6 +2161,7 @@ function renderPesquisa() {
                         <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">${tableRows}</tbody>
                     </table>
                 </div>
+                ${pesquisaPaginator}
             </div>
         </div>
     `;
@@ -2449,12 +2489,16 @@ function handleSearchInput(inputElement, stateVariable, pageToReset = null) {
     if (stateVariable === 'radioSearch') radioSearch = value.toLowerCase();
     else if (stateVariable === 'equipamentoSearch') equipamentoSearch = value.toLowerCase();
     else if (stateVariable === 'geralSearch') geralSearch = value.toLowerCase();
+    // 🌟 NOVO: Salva o termo de busca da pesquisa
+    else if (stateVariable === 'searchTermPesquisa') searchTermPesquisa = value.toLowerCase();
     else if (stateVariable === '_searchTermTemp') window._searchTermTemp = value;	
     
     if (pageToReset) {
         if (stateVariable === 'radioSearch') radioPage = 1;
         else if (stateVariable === 'equipamentoSearch') equipamentoPage = 1;
         else if (stateVariable === 'geralSearch') geralPage = 1;
+        // 🌟 NOVO: Reseta a página de pesquisa
+        else if (stateVariable === 'searchTermPesquisa') pesquisaPage = 1;
     }
 
     renderApp();
@@ -2524,7 +2568,7 @@ async function handleLoginSubmit(e) {
         // O Firebase Auth cuida da checagem de senha para logins baseados em email normal.
         
         await signInWithEmailAndPassword(auth, emailToLogin, password);
-        // Sucesso: onAuthStateChanged cuidará do resto
+        // Sucesso: onAuthStateChanged cuidará do resto (incluindo o splash screen)
         
     } catch (error) {
         isLoggingIn = false;
@@ -2716,7 +2760,7 @@ function attachCadastroGeralEvents() {
     // 🌟 INICIALIZAÇÃO DO TOM SELECT 🌟
     if (typeof TomSelect !== 'undefined') {
         // Garante que o TomSelect não seja inicializado mais de uma vez (caso a função seja chamada múltiplas vezes)
-        if (!radioSelect.TomSelect) {
+        if (radioSelect && !radioSelect.TomSelect) {
             new TomSelect(radioSelect, {
                 plugins: ['dropdown_input'],
                 maxItems: 1,
@@ -2724,7 +2768,7 @@ function attachCadastroGeralEvents() {
                 placeholder: 'Digite para buscar o Rádio...',
             });
         }
-        if (!equipamentoSelect.TomSelect) {
+        if (equipamentoSelect && !equipamentoSelect.TomSelect) {
             new TomSelect(equipamentoSelect, {
                 plugins: ['dropdown_input'],
                 maxItems: 1,
@@ -2867,11 +2911,14 @@ function attachCadastroGeralEvents() {
 }
 
 function attachPesquisaEvents() {
-    const searchButton = document.getElementById('search-button');
-    if(searchButton){
-        searchButton.onclick = () => {
-            const searchInput = document.getElementById('search-term');
-            if(searchInput) searchInput.dispatchEvent(new Event('input'));
+    const searchInput = document.getElementById('search-term');
+    if(searchInput) {
+        // Garantindo que a busca reinicie a página de pesquisa
+        searchInput.oninput = (e) => handleSearchInput(e.target, 'searchTermPesquisa', 1);
+        
+        const searchButton = document.getElementById('search-button');
+        if(searchButton) {
+            searchButton.onclick = () => searchInput.dispatchEvent(new Event('input'));
         }
     }
 }
@@ -3078,11 +3125,20 @@ function handleHashChange() {
     }
 }
 
+// 🌟 NOVO: Tempo mínimo de exibição do splash screen (2 segundos)
+const MIN_SPLASH_TIME = 2000;
+let splashStart = 0;
+
 function setupAuthListener() {
     // [NOVO] Carrega as configurações antes de checar o estado de autenticação para ter a lista de usuários
     loadInitialSettings().then(() => {
         onAuthStateChanged(auth, async (user) => {
             if (user) {
+                // 🌟 INÍCIO DO SPLASH SCREEN
+                splashStart = Date.now();
+                isLoggingIn = true; // Mantém a flag ligada durante o carregamento dos dados
+                renderApp();
+
                 userId = user.uid;
                 // Usa a lista de settings.users que já foi pré-carregada
                 let appUser = settings.users.find(u => u.username === user.email);
@@ -3108,8 +3164,18 @@ function setupAuthListener() {
                     // Adiciona o customUsername ao objeto currentUser para uso no App
                     currentUser = { ...appUser, uid: user.uid, email: user.email, customUsername: appUser.customUsername || null };
                     isAuthReady = true;
-                    isLoggingIn = false;	
+                    // isLoggingIn é desligado após o delay
+
                     await attachFirestoreListeners();	
+
+                    // 🌟 FIM DO SPLASH SCREEN APÓS O DELAY
+                    const elapsed = Date.now() - splashStart;
+                    const delay = Math.max(0, MIN_SPLASH_TIME - elapsed);
+                    
+                    setTimeout(() => {
+                        isLoggingIn = false;
+                        renderApp();
+                    }, delay);
                 } else {
                     // Usuário autenticado, mas sem perfil no Firestore (não aprovado).
                     if (user.email) {
@@ -3567,6 +3633,7 @@ window.deleteUser = deleteUser;
 window.setRadioPage = setRadioPage;
 window.setEquipamentoPage = setEquipamentoPage;
 window.setGeralPage = setGeralPage;
+window.setPesquisaPage = setPesquisaPage; // 🌟 NOVO: Expondo paginação da pesquisa
 window.handleSolicitarAcesso = handleSolicitarAcesso; 
 window.showProfileModal = showProfileModal;
 window.hideProfileModal = hideProfileModal;

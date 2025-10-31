@@ -162,6 +162,20 @@
             transition: all 0.4s ease;
         }
 
+        .radio-custom::after {
+            /* O anel de órbita será mantido para o efeito visual moderno */
+            content: "";
+            position: absolute;
+            width: 30px; /* Reduzido */
+            height: 30px;
+            border: 2px solid transparent;
+            border-radius: 50%;
+            border-top-color: #00a6ff;
+            opacity: 0;
+            transform: scale(0.8);
+            transition: all 0.4s ease;
+        }
+
         .radio-text {
             font-size: 0.9rem; /* Ajustado para caber melhor na navegação */
             font-weight: 500;
@@ -278,6 +292,12 @@
             background-color: #f0fdf4; /* Cor de hover suave */
             box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
         }
+
+        /* [CORREÇÃO] Estilo para evitar quebra de linha feia em texto longo (como email) */
+        .break-words-all {
+            word-break: break-all;
+            /* overflow-wrap: break-word; */
+        }
     </style>
 </head>
 <body>
@@ -298,9 +318,21 @@
         </div>
     </div>
     
-    <!-- NOVO: Modal de Perfil Pessoal (antiga aba de Configurações) -->
-    <div id="profile-modal" class="fixed inset-0 z-40 hidden items-center justify-center p-4 modal-overlay">
-        <!-- Conteúdo do perfil será injetado aqui -->
+    <!-- NOVO: Modal de Gerenciamento de Perfil (Para qualquer usuário) -->
+    <div id="profile-modal" class="fixed inset-0 z-50 hidden items-center justify-center p-4 modal-overlay">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-lg transform transition-all scale-100 opacity-100 p-6">
+            <h3 class="text-2xl font-bold text-gray-800 mb-6 border-b pb-2 flex items-center">
+                <i class="fas fa-user-circle mr-2 text-green-main"></i> Meu Perfil
+            </h3>
+            <div id="profile-modal-content" class="space-y-8">
+                <!-- Conteúdo do perfil será injetado aqui -->
+            </div>
+            <div class="flex justify-end mt-6">
+                <button onclick="hideProfileModal()" class="px-4 py-2 text-sm bg-gray-200 text-gray-700 font-semibold rounded-lg hover:bg-gray-300 transition-colors shadow-md">
+                    Fechar
+                </button>
+            </div>
+        </div>
     </div>
 
     <!-- Firebase SDKs -->
@@ -312,7 +344,9 @@
             signInWithEmailAndPassword, 
             onAuthStateChanged, 
             signOut,
-            updatePassword
+            updatePassword,
+            // NOVO IMPORT: Necessário para criar usuários se o Admin cadastrar com senha/username
+            createUserWithEmailAndPassword 
         } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { 
             getFirestore, 
@@ -341,7 +375,7 @@
             apiKey: "AIzaSyCb0Dhh_eMHrs_Dyg1wS5nbMu1U6tKHa3A",
             authDomain: "gestaoradios-58b0a.firebaseapp.com",
             projectId: "gestaoradios-58b0a",
-            storageBucket: "gestaoradios-58b0a.firebasestorage.app",
+            storageBucket: "gestaoradios-58b0a.firebaseapp.com",
             messagingSenderId: "359260635463",
             appId: "1:359260635463:web:1c3ac47eebcd3434818c62",
             measurementId: "G-DVXXT79TZK"
@@ -357,7 +391,7 @@
         let currentPage = 'login';
         let currentLoginView = 'login'; // 'login' ou 'solicitar'
         let currentCadastroTab = 'radio';
-        let currentSettingTab = 'my-profile'; 
+        let currentSettingTab = 'system'; 
         let isLoggingIn = false;
         // NOVO: Armazena usuários aguardando aprovação
         let pendingUsers = [];
@@ -395,25 +429,23 @@
         
         // --- Constantes de Tooltip para Importação ---
         const RADIO_IMPORT_INFO = `
-            O arquivo CSV ou XLSX deve conter as seguintes colunas obrigatórias (a ordem não importa, mas os nomes devem ser exatos ou variantes comuns):
-            <ul class="list-disc list-inside mt-2 space-y-1 font-mono">
-                <li class="font-bold">Numero de Serie</li>
-                <li class="font-bold">Modelo (ou Modelo de Radio)</li>
+            O arquivo CSV ou XLSX deve conter as seguintes colunas obrigatórias:
+            <ul class="list-disc list-inside mt-2 space-y-1">
+                <li class="font-semibold">Numero de Serie</li>
+                <li class="font-semibold">Modelo</li>
             </ul>
-            <p class="mt-3">Exemplo de dados (CSV):<br><span class="bg-gray-100 p-1 rounded block text-sm">"Numero de Serie",Modelo<br>15154s5asd51,EM200</span></p>
-            <p class="mt-2 text-red-500">Duplicatas de "Numero de Serie" serão ignoradas.</p>
+            Outras colunas serão ignoradas.
         `;
 
         const EQUIPAMENTO_IMPORT_INFO = `
             O arquivo CSV ou XLSX deve conter as seguintes colunas obrigatórias:
-            <ul class="list-disc list-inside mt-2 space-y-1 font-mono">
-                <li class="font-bold">Frota</li>
-                <li class="font-bold">Grupo (Deve ser um dos: Colheita, Transporte, Oficina, TPL, Industria)</li>
-                <li class="font-bold">Modelo do Equipamento (ou Modelo Equipamento)</li>
-                <li class="font-bold">Subgrupo (ou Descricao do Equipamento)</li>
+            <ul class="list-disc list-inside mt-2 space-y-1">
+                <li class="font-semibold">Frota</li>
+                <li class="font-semibold">Grupo (Deve ser um dos: Colheita, Transporte, Oficina, TPL, Industria)</li>
+                <li class="font-semibold">Modelo do Equipamento</li>
+                <li class="font-semibold">Subgrupo (Descrição do Equipamento)</li>
             </ul>
-            <p class="mt-3"><span class="font-semibold">Coluna Opcional:</span> Gestor</p>
-            <p class="mt-2 text-red-500">Duplicatas de "Frota" serão ignoradas.</p>
+            <p class="mt-2"><span class="font-semibold">Coluna Opcional:</span> Gestor</p>
         `;
 
 
@@ -424,24 +456,20 @@
         }
 
         /**
-         * [NOVO] Função para adicionar logs de atividade.
+         * NOVO: Verifica se o valor é um email ou um nome de usuário.
          */
-        async function addLogEntry(action, userEmail, details = {}) {
-            if (!db || !appId) return;
-            try {
-                const logsColRef = collection(db, `artifacts/${appId}/public/data/logs`);
-                await addDoc(logsColRef, {
-                    timestamp: new Date().toISOString(),
-                    action: action,
-                    user: userEmail,
-                    details: details
-                });
-            } catch (e) {
-                console.error("Erro ao registrar log:", e);
-                // Falha silenciosa para não quebrar a funcionalidade principal
-            }
+        function isEmail(value) {
+            return value.includes('@') && value.includes('.');
         }
 
+        /**
+         * NOVO: Cria um email genérico para uso no Firebase Auth
+         */
+        function createGenericEmail(customUsername, appId) {
+            // Garante que o username é seguro para ser a parte local do email
+            const safeUsername = customUsername.toLowerCase().replace(/[^a-z0-9]/g, '');
+            return `${safeUsername}@${appId}.fake`;
+        }
 
         async function loadInitialSettings() {
             if (!db || !appId) return;
@@ -540,7 +568,7 @@
             // [CORREÇÃO] Usa appId hardcoded
             const settingsDocRef = doc(db, "artifacts", appId, "public", "data", "settings", "config");
             try {
-                // A escrita aqui exige permissão de isAdminPrincipal() (Regra 2)
+                // A escrita aqui exige permissão de isAdmin() (Regra 1)
                 await setDoc(settingsDocRef, {	
                     letterMap: settings.letterMap,
                     nextIndex: settings.nextIndex,
@@ -563,7 +591,7 @@
                     }
                     currentPage = value;
                     currentCadastroTab = 'radio';	
-                    currentSettingTab = 'my-profile'; // Resetar para o padrão
+                    currentSettingTab = 'system';
                     radioPage = 1; equipamentoPage = 1; geralPage = 1;
                     radioSearch = ''; equipamentoSearch = ''; geralSearch = '';
                     focusedSearchInputId = null;	
@@ -765,15 +793,21 @@
             }
         }
         
-        // --- Funções de CRUD de Usuário ---
+        // --- Funções de CRUD de Usuário (ATUALIZADO PARA CUSTOM LOGIN) ---
 
         function loadUserForEdit(id) {
             const user = settings.users.find(u => u.id === id);
             if (user) {
                 document.getElementById('user-id').value = user.id;
                 document.getElementById('user-name').value = user.name;
-                document.getElementById('user-username').value = user.username;
+                document.getElementById('user-username').value = user.username; // Email
+                document.getElementById('user-custom-username').value = user.customUsername || ''; // NOVO: Nome de usuário
                 document.getElementById('user-role').value = user.role;
+                
+                // Oculta o campo de senha para edição, a menos que o admin queira alterá-la.
+                document.getElementById('user-password-field').classList.add('hidden');
+                document.getElementById('user-password').value = ''; 
+
                 document.getElementById('user-form-title').textContent = 'Editar Perfil de Usuário';
                 showModal('Edição', `Carregando perfil de ${user.name} para edição.`, 'info');
                 window.scrollTo(0, 0);
@@ -786,54 +820,100 @@
             e.preventDefault();
             const id = document.getElementById('user-id').value;
             const name = document.getElementById('user-name').value.trim();
-            const username = document.getElementById('user-username').value.trim(); // Email
+            let email = document.getElementById('user-username').value.trim(); // Email
+            const customUsername = document.getElementById('user-custom-username').value.trim(); // NOVO: Nome de usuário
+            const password = document.getElementById('user-password').value; // Senha (apenas para criação/reset)
             const role = document.getElementById('user-role').value;
             
-            if (!name || !username || !role) {
-                showModal('Erro', 'Nome, Username (Email) e Perfil são obrigatórios.', 'error');
+            // Validação de campos obrigatórios
+            if (!name || !role) {
+                showModal('Erro', 'Nome Completo e Perfil são obrigatórios.', 'error');
                 return;
             }
-            
-            // Validações de email básico
-            if (!username.includes('@') || !username.includes('.')) {
-                showModal('Erro', 'Username deve ser um email válido.', 'error');
+
+            // 1. Lógica de email/username
+            if (customUsername) {
+                // Se houver customUsername, o email é opcional.
+                if (!email) {
+                    // Gera email genérico se customUsername existe e email não.
+                    email = createGenericEmail(customUsername, appId);
+                } else if (!isEmail(email)) {
+                    showModal('Erro', 'O campo Username (Email) deve ser um email válido ou vazio se usar Nome de Usuário.', 'error');
+                    return;
+                }
+            } else if (!isEmail(email)) {
+                // Se não houver customUsername, o email é obrigatório e deve ser válido.
+                showModal('Erro', 'Username (Email) é obrigatório ou forneça um Nome de Usuário.', 'error');
                 return;
             }
+
 
             const usersFromDB = settings.users;
             const isEditing = !!id;
             
-            // Checagem de duplicidade (apenas se for novo OU se o email for alterado na edição)
-            const isDuplicate = usersFromDB.some(u => 
-                u.username === username && (!isEditing || u.id !== id)
+            // 2. Checagem de duplicidade (Username/Email E Nome de Usuário)
+            const isDuplicateEmail = usersFromDB.some(u => 
+                u.username === email && (!isEditing || u.id !== id)
             );
 
-            if (isDuplicate) {
-                showModal('Erro', 'Este Username/Email já está em uso por outro perfil.', 'error');
+            if (isDuplicateEmail) {
+                showModal('Erro', `Este Email (${email}) já está em uso.`, 'error');
                 return;
             }
-            
+
+            if (customUsername) {
+                 const isDuplicateCustomUsername = usersFromDB.some(u => 
+                    u.customUsername && u.customUsername.toLowerCase() === customUsername.toLowerCase() && (!isEditing || u.id !== id)
+                );
+                if (isDuplicateCustomUsername) {
+                    showModal('Erro', `Este Nome de Usuário (${customUsername}) já está em uso.`, 'error');
+                    return;
+                }
+            }
+
             let userToSave;
+            let shouldCreateAuth = false;
+            let shouldUpdateAuthPassword = false;
+
             if (isEditing) {
                 userToSave = usersFromDB.find(u => u.id === id);
                 if (!userToSave) {
                     showModal('Erro', 'Erro ao encontrar usuário para edição.', 'error');
                     return;
                 }
+                
+                // Se a senha foi preenchida na edição
+                if (password.length > 0) {
+                    if (password.length < 6) {
+                        showModal('Erro', 'A senha deve ter pelo menos 6 caracteres para ser salva.', 'error');
+                        return;
+                    }
+                    shouldUpdateAuthPassword = true;
+                }
+
                 userToSave.name = name;
-                userToSave.username = username;
+                userToSave.username = email;
+                userToSave.customUsername = customUsername;
                 userToSave.role = role;
                 // Mantém as permissões existentes
+
             } else {
                 // Novo usuário
+                if (password.length < 6) {
+                    showModal('Erro', 'Para um novo usuário, a Senha é obrigatória e deve ter pelo menos 6 caracteres.', 'error');
+                    return;
+                }
+
                 userToSave = { 
                     id: crypto.randomUUID(), // Novo ID único
                     name, 
-                    username, 
+                    username: email, // O email (real ou fake) que será usado no Firebase Auth
+                    customUsername, // O nome de usuário de login (se existir)
                     role, 
                     permissions: {} // Permissões padrão vazias
                 };
                 usersFromDB.push(userToSave);
+                shouldCreateAuth = true;
             }
             
             // Definição de permissões padrão para um novo usuário ou se o perfil mudou para admin
@@ -842,21 +922,54 @@
                     dashboard: true, cadastro: true, pesquisa: true, settings: role === 'admin'
                 };
             }
-            
-            // Salva a lista completa no Firestore
-            const settingsDocRef = doc(db, "artifacts", appId, "public", "data", "settings", "config");
+
             try {
+                // 3. (NOVO) Criar/Atualizar Usuário no Firebase Auth
+                if (shouldCreateAuth) {
+                    await createUserWithEmailAndPassword(auth, email, password);
+                }
+                
+                // Se for edição e a senha foi alterada, usamos o Auth SDK
+                if (shouldUpdateAuthPassword) {
+                    // Armazenamos a senha para customUsername.
+                    if (userToSave.customUsername) {
+                        userToSave.loginPassword = password; 
+                    } else {
+                         // Se for login por email normal, a senha não deve ser armazenada no Firestore.
+                         showModal('Aviso de Senha', 'Para usuários com email real, a senha só pode ser alterada via console do Firebase ou reset de senha do usuário. O campo foi ignorado.', 'warning');
+                    }
+                } else if (shouldCreateAuth && userToSave.customUsername) {
+                    // Para novos usuários com customUsername, armazena a senha inicial para o check no login.
+                    userToSave.loginPassword = password; 
+                }
+
+                // 4. Salva a lista completa no Firestore (incluindo customUsername e loginPassword)
+                const settingsDocRef = doc(db, "artifacts", appId, "public", "data", "settings", "config");
                 await setDoc(settingsDocRef, { users: usersFromDB }, { merge: true });
+
                 showModal('Sucesso', `Perfil de ${name} ${isEditing ? 'atualizado' : 'cadastrado'} com sucesso!`, 'success');
                 
-                // Limpa formulário e força renderização
-                document.getElementById('form-user').reset();
-                document.getElementById('user-id').value = '';
-                document.getElementById('user-form-title').textContent = 'Novo Perfil de Usuário';
-                renderApp(); 
+                // Força a re-renderização
+                renderApp();
+
+                // Limpa o formulário após a próxima renderização para evitar o erro "Cannot read properties of null (reading 'reset')"
+                setTimeout(() => {
+                    const currentForm = document.getElementById('form-user');
+                    if (currentForm) {
+                        currentForm.reset();
+                        document.getElementById('user-id').value = '';
+                        document.getElementById('user-form-title').textContent = 'Novo Perfil de Usuário';
+                        document.getElementById('user-password-field').classList.remove('hidden');
+                    }
+                }, 100);
+
             } catch (e) {
-                console.error("Erro ao salvar perfil de usuário:", e);
-                showModal('Erro', 'Não foi possível salvar o perfil no banco de dados.', 'error');
+                console.error("Erro ao salvar perfil de usuário/Auth:", e);
+                let msg = 'Não foi possível salvar o perfil. Verifique se o usuário já existe no Firebase Auth ou se a senha tem 6+ caracteres.';
+                if (e.code === 'auth/email-already-in-use') {
+                    msg = `O email (${email}) já está em uso no Firebase Auth. Verifique o console do Firebase ou exclua o usuário primeiro.`;
+                }
+                showModal('Erro', msg, 'error');
             }
         }
 
@@ -885,6 +998,7 @@
                 // Salva a lista completa (sem o usuário removido) no Firestore
                 await setDoc(settingsDocRef, { users: usersFromDB }, { merge: true });
                 showModal('Sucesso', `Perfil de ${userName} excluído com sucesso!`, 'success');
+                // NOTA: A exclusão do usuário do Firebase Auth deve ser feita manualmente pelo Admin via Console, por segurança.
                 renderApp(); 
             } catch (e) {
                 console.error("Erro ao excluir perfil de usuário:", e);
@@ -928,8 +1042,6 @@
                 batch.update(settingsDocRef, { users: usersFromDB });
                 
                 await batch.commit();
-                
-                addLogEntry('USER_APPROVED', currentUser.email, { approved_email: email, pending_id: pendingId });
 
                 // 3. Notificar sucesso e fechar modal
                 hideModal();
@@ -954,8 +1066,6 @@
             
             try {
                 await deleteDoc(pendingDocRef);
-                
-                addLogEntry('USER_REJECTED', currentUser.email, { rejected_name: name, pending_id: pendingId });
 
                 // 2. Notificar sucesso e fechar modal
                 hideModal();
@@ -982,7 +1092,7 @@
                 showModal('Erro', 'Todos os campos são obrigatórios.', 'error');
                 return;
             }
-            if (!email.includes('@') || !email.includes('.')) {
+            if (!isEmail(email)) {
                 showModal('Erro', 'Email inválido.', 'error');
                 return;
             }
@@ -1014,8 +1124,6 @@
                     tempPassword: senhaProvisoria, // A senha provisória é apenas para referência do Admin
                     createdAt: new Date().toISOString()
                 });
-                
-                addLogEntry('ACCESS_REQUEST', email);
 
                 showModal('Solicitação Enviada', 
                     `Sua solicitação de acesso foi enviada com sucesso para aprovação. Você será notificado após a análise.`, 
@@ -1098,89 +1206,7 @@
         
         // --- FIM NOVAS FUNÇÕES: Gerenciamento de Pendências ---
 
-        /**
-         * [NOVO] Função para renderizar o modal de Perfil Pessoal
-         */
-        function renderProfileModal() {
-             const user = currentUser;
-             if (!user) return;
-
-             const modalHtml = `
-                <div class="bg-white rounded-xl shadow-2xl w-full max-w-xl transform transition-all scale-100 opacity-100 p-6">
-                    <div class="flex justify-between items-center mb-4 border-b pb-3">
-                        <h3 class="text-2xl font-bold text-gray-800 flex items-center space-x-2">
-                            ${getUserAvatar(user)}
-                            <span>Meu Perfil</span>
-                        </h3>
-                        <button onclick="document.getElementById('profile-modal').classList.add('hidden')" class="text-gray-400 hover:text-gray-600 p-2 rounded-full hover:bg-gray-100 transition-colors" title="Fechar">
-                            <i class="fas fa-times"></i>
-                        </button>
-                    </div>
-
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <!-- Informações do Perfil -->
-                        <div class="space-y-4">
-                            <div class="bg-gray-50 p-4 rounded-lg border border-gray-200">
-                                <p class="text-sm text-gray-600">Seu Email (Username):</p>
-                                <p class="font-semibold text-gray-800">${user.email}</p>
-                            </div>
-                            <div class="bg-gray-50 p-4 rounded-lg border border-gray-200">
-                                <p class="text-sm text-gray-600">Seu Perfil:</p>
-                                <p class="font-bold text-green-main">${user.role.toUpperCase()}</p>
-                            </div>
-                            <!-- 1. Gerenciar Nome de Exibição -->
-                            <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
-                                <h4 class="text-base font-semibold text-gray-800 mb-3">Gerenciar Nome de Exibição</h4>
-                                <form id="form-personal-name" class="space-y-3">
-                                    <div>
-                                        <label for="profile-name" class="block text-xs font-medium text-gray-700">Nome de Exibição Atual</label>
-                                        <input type="text" id="profile-name" required value="${user.name}"
-                                            class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-main focus:ring-green-main p-2 border text-sm">
-                                    </div>
-                                    <button type="submit" class="w-full flex justify-center py-2 px-3 border border-transparent text-sm font-medium rounded-lg text-white bg-green-main hover:bg-green-700 shadow-md">
-                                        <i class="fas fa-save mr-2"></i> Salvar Nome
-                                    </button>
-                                </form>
-                            </div>
-                        </div>
-
-                        <!-- 2. Alterar Senha -->
-                        <div class="bg-white p-4 rounded-xl shadow-sm border border-red-200">
-                            <h4 class="text-base font-semibold text-red-600 mb-3">Alterar Senha</h4>
-                            <p class="text-xs text-red-500 mb-3">
-                                Atenção: Você pode precisar fazer login novamente após a alteração.
-                            </p>
-                            <form id="form-change-password" class="space-y-3">
-                                <div>
-                                    <label for="profile-new-password" class="block text-xs font-medium text-gray-700">Nova Senha</label>
-                                    <input type="password" id="profile-new-password" required minlength="6"
-                                        class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-red-500 focus:ring-red-500 p-2 border text-sm">
-                                </div>
-                                <div>
-                                    <label for="profile-confirm-password" class="block text-xs font-medium text-gray-700">Confirmar Nova Senha</label>
-                                    <input type="password" id="profile-confirm-password" required minlength="6"
-                                        class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-red-500 focus:ring-red-500 p-2 border text-sm">
-                                </div>
-                                <button type="submit" class="w-full flex justify-center py-2 px-3 border border-transparent text-sm font-medium rounded-lg text-white bg-red-600 hover:bg-red-700 shadow-md">
-                                    <i class="fas fa-lock mr-2"></i> Alterar Senha
-                                </button>
-                            </form>
-                        </div>
-                    </div>
-                </div>
-             `;
-            
-             const profileModal = document.getElementById('profile-modal');
-             profileModal.innerHTML = modalHtml;
-             profileModal.classList.remove('hidden');
-             profileModal.classList.add('flex');
-
-             // Anexa eventos DENTRO do modal
-             document.getElementById('form-personal-name').onsubmit = savePersonalName;
-             document.getElementById('form-change-password').onsubmit = changePassword;
-        }
-
-        // --- Funções de Perfil Pessoal (Mantidas e movidas para o escopo global) ---
+        // --- NOVAS FUNÇÕES: Gerenciamento Pessoal (Meu Perfil) ---
 
         async function savePersonalName(e) {
             e.preventDefault();
@@ -1205,8 +1231,8 @@
                 await setDoc(settingsDocRef, { users: usersFromDB }, { merge: true });
                 // Atualiza o estado local do usuário e força renderização
                 currentUser.name = newName;
-                document.getElementById('profile-modal').classList.add('hidden'); // Fecha modal
                 showModal('Sucesso', 'Nome de exibição atualizado com sucesso!', 'success');
+                hideProfileModal();
                 renderApp();
             } catch (e) {
                 console.error("Erro ao salvar nome pessoal:", e);
@@ -1235,10 +1261,11 @@
             }
 
             try {
+                // O Firebase Auth cuida da reautenticação se necessário.
                 await updatePassword(user, newPassword);
-                document.getElementById('profile-modal').classList.add('hidden'); // Fecha modal
                 showModal('Sucesso', 'Senha alterada com sucesso! Você pode ser solicitado a fazer login novamente.', 'success');
                 document.getElementById('form-change-password').reset();
+                hideProfileModal();
             } catch (error) {
                 console.error("Erro ao trocar senha:", error.code);
                 let msg = 'Ocorreu um erro ao trocar a senha.';
@@ -1251,7 +1278,7 @@
             }
         }
         
-        // --- FIM MOVIMENTAÇÃO DE FUNÇÕES ---
+        // --- FIM NOVAS FUNÇÕES: Gerenciamento Pessoal (Meu Perfil) ---
 
         // --- Funções de Importação ---
         // ... (resto das funções de importação)
@@ -1269,8 +1296,6 @@
                 if (file.name.endsWith('.csv')) {
                     Papa.parse(data, {
                         header: true, skipEmptyLines: true,
-                        // Adicionando step para limpar os nomes das colunas (ex: "Numero de Serie\r\n" -> "Numero de Serie")
-                        transformHeader: (header) => header ? header.replace(/[^a-zA-Z0-9\s]/g, '').trim() : header, 
                         complete: function(results) {
                             processImportedData(collection, results.data);
                         }
@@ -1279,29 +1304,8 @@
                     const workbook = XLSX.read(data, { type: 'binary' });
                     const firstSheetName = workbook.SheetNames[0];
                     const worksheet = workbook.Sheets[firstSheetName];
-                    // [CORREÇÃO] Usando header: 1 para ler nomes de colunas como strings e tratar no código
-                    parsedData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }); 
-                    
-                    // Tratamento de cabeçalho para XLSX: assume a primeira linha como cabeçalho
-                    if (parsedData.length > 0) {
-                        const headers = parsedData[0].map(h => h ? String(h).replace(/[^a-zA-Z0-9\s]/g, '').trim() : '');
-                        const dataRows = parsedData.slice(1);
-                        
-                        const finalData = dataRows.map(row => {
-                            let obj = {};
-                            headers.forEach((header, index) => {
-                                // Mapeia o valor da coluna para o nome do cabeçalho limpo
-                                if (header) obj[header] = row[index];
-                            });
-                            return obj;
-                        }).filter(obj => Object.keys(obj).length > 0); // Remove linhas vazias
-
-                        processImportedData(collection, finalData);
-
-                    } else {
-                        processImportedData(collection, []); // Arquivo vazio
-                    }
-
+                    parsedData = XLSX.utils.sheet_to_json(worksheet);
+                    processImportedData(collection, parsedData);
                 } else {
                     showModal('Erro', 'Formato de arquivo não suportado. Use CSV ou XLSX.', 'error');
                 }
@@ -1326,8 +1330,7 @@
                 let isDuplicate = false;
                 
                 if (collectionName === 'radios') {
-                    // [CORREÇÃO] Procurando por variações dos nomes de coluna
-                    const serie = item['Numero de Serie'] || item['Numero deSerie'] || item['serie'] || item['Numero de Serie\r'] || item['Numero de Serie\n'];
+                    const serie = item['Numero de Serie'] || item['Numero deSerie'] || item['serie'];
                     const modelo = item['Modelo'] || item['Modelo de Radio'] || item['modelo'];
                     
                     if (!serie || !modelo) continue;
@@ -1336,18 +1339,17 @@
                     record.modelo = String(modelo).trim();
                     record.status = 'Disponível';	
 
-                    // [VALIDAÇÃO] Checagem de duplicidade no cache local
+                    // [CORREÇÃO] Checagem de duplicidade no cache local
                     if (currentDb.some(r => r.serie === record.serie)) {
                         console.warn(`Rádio duplicado (cache local): ${record.serie}. Ignorando.`);
                         isDuplicate = true;
                     }
                     
                 } else if (collectionName === 'equipamentos') {
-                    // [CORREÇÃO] Procurando por variações dos nomes de coluna
                     const frota = item['Frota'];
                     const grupo = item['Grupo'];
-                    const modeloEq = item['Modelo do Equipamento'] || item['ModeloEquipamento'] || item['Modelo Equipamento'];
-                    const subgrupo = item['Subgrupo'] || item['Descricao do Equipamento'] || item['DescricaoEquipamento'] || item['Descricao Equipamento'];
+                    const modeloEq = item['Modelo do Equipamento'] || item['Modelo Equipamento'];
+                    const subgrupo = item['Subgrupo'] || item['Descricao do Equipamento'] || item['Descricao Equipamento'];
                     const gestor = item['Gestor'] || 'Sem Gestor';
                     
                     if (!frota || !grupo || !modeloEq || !subgrupo || !GROUPS.includes(String(grupo).trim())) {
@@ -1361,7 +1363,7 @@
                     record.subgrupo = String(subgrupo).trim();	
                     record.gestor = String(gestor).trim();
                     
-                    // [VALIDAÇÃO] Checagem de duplicidade no cache local
+                    // [CORREÇÃO] Checagem de duplicidade no cache local
                     if (currentDb.some(r => r.frota === record.frota)) {
                         console.warn(`Equipamento duplicado (cache local): ${record.frota}. Ignorando.`);
                         isDuplicate = true;
@@ -1392,8 +1394,6 @@
                     if (ignoredCount > 0) {
                         msg += `<br>(${ignoredCount} duplicatas ignoradas.)`;
                     }
-                    addLogEntry('BULK_IMPORT', currentUser.email, { collection: collectionName, imported: newRecords.length, ignored: ignoredCount });
-
                     showModal('Importação Concluída', msg, 'success');
                 } catch (error) {
                     console.error("Erro ao salvar importação em lote:", error);
@@ -1407,47 +1407,6 @@
                 showModal('Importação', msg, 'info');
             }
         }
-
-        /**
-         * [NOVO] Função para exportar dados gerais (registros + rádio + equipamento)
-         */
-        function exportGeralDataToXLSX() {
-            if (dbRegistros.length === 0) {
-                showModal('Erro de Exportação', 'Não há registros para exportar.', 'warning');
-                return;
-            }
-
-            const radioMap = dbRadios.reduce((acc, r) => { acc[r.id] = r; return acc; }, {});
-            const equipamentoMap = dbEquipamentos.reduce((acc, e) => { acc[e.id] = e; return acc; }, {});
-
-            const exportData = dbRegistros.map(reg => {
-                const r = radioMap[reg.radioId] || {};
-                const e = equipamentoMap[reg.equipamentoId] || {};
-                
-                return {
-                    'Código': e.codigo || reg.codigo || 'N/A',
-                    'Frota': e.frota || 'N/A',
-                    'Grupo': e.grupo || 'N/A',
-                    'Subgrupo': e.subgrupo || 'N/A',
-                    'Gestor': e.gestor || 'N/A',
-                    'Série Rádio': r.serie || 'N/A',
-                    'Modelo Rádio': r.modelo || 'N/A',
-                    'Data de Associação': reg.createdAt ? new Date(reg.createdAt).toLocaleString() : 'N/A'
-                };
-            });
-
-            const worksheet = XLSX.utils.json_to_sheet(exportData);
-            const workbook = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(workbook, worksheet, "Registros Ativos");
-
-            const date = new Date().toISOString().slice(0, 10);
-            const filename = `registros_geral_${date}.xlsx`;
-            XLSX.writeFile(workbook, filename);
-
-            addLogEntry('EXPORT_DATA', currentUser.email, { filename: filename, count: exportData.length, collection: 'registros' });
-            showModal('Sucesso', `Dados exportados com sucesso para ${filename}`, 'success');
-        }
-
 
         // --- Funções de Modal ---
         function showModal(title, message, type = 'info') {
@@ -1516,6 +1475,83 @@
             document.getElementById('global-modal').classList.add('hidden');
             document.getElementById('global-modal').classList.remove('flex');
         }
+        
+        // NOVO: Funções para o Modal de Perfil
+        function showProfileModal() {
+            renderProfileModalContent();
+            document.getElementById('profile-modal').classList.remove('hidden');
+            document.getElementById('profile-modal').classList.add('flex');
+        }
+
+        function hideProfileModal() {
+            document.getElementById('profile-modal').classList.add('hidden');
+            document.getElementById('profile-modal').classList.remove('flex');
+        }
+
+        function renderProfileModalContent() {
+            const modalContent = document.getElementById('profile-modal-content');
+            if (!currentUser) {
+                modalContent.innerHTML = '<p class="text-red-500">Erro: Usuário não logado.</p>';
+                return;
+            }
+            
+            // Layout centralizado para dispositivos móveis
+            modalContent.innerHTML = `
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <!-- 1. Gerenciar Nome de Exibição -->
+                    <div class="bg-gray-50 p-4 rounded-xl shadow-inner border border-gray-200">
+                        <h4 class="text-xl font-semibold text-gray-800 mb-3 flex items-center">
+                            <i class="fas fa-user-edit mr-2 text-green-main"></i> Gerenciar Nome
+                        </h4>
+                        <p class="text-xs text-gray-600 mb-3">
+                            Altere o nome que aparece na barra superior.
+                        </p>
+                        <form id="form-personal-name" class="space-y-3">
+                            <div>
+                                <label for="profile-name" class="block text-sm font-medium text-gray-700">Nome de Exibição Atual</label>
+                                <input type="text" id="profile-name" required value="${currentUser.name}"
+                                    class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-main focus:ring-green-main p-2 border text-sm">
+                            </div>
+                            <button type="submit" class="w-full flex justify-center py-2 px-3 border border-transparent text-sm font-medium rounded-lg text-white bg-green-main hover:bg-green-700 shadow-md">
+                                <i class="fas fa-save mr-2"></i> Salvar Nome
+                            </button>
+                        </form>
+                        <div class="mt-4 p-3 bg-white border border-gray-200 rounded-lg text-xs text-gray-700 break-words-all">
+                            <p><span class="font-semibold">Seu Login Principal:</span> ${currentUser.customUsername || currentUser.email}</p>
+                            <p><span class="font-semibold">Seu Perfil:</span> ${currentUser.role.toUpperCase()}</p>
+                        </div>
+                    </div>
+                    
+                    <!-- 2. Alterar Senha -->
+                    <div class="bg-gray-50 p-4 rounded-xl shadow-inner border border-red-200">
+                        <h4 class="text-xl font-semibold text-gray-800 mb-3 flex items-center">
+                            <i class="fas fa-key mr-2 text-red-600"></i> Alterar Senha
+                        </h4>
+                        <p class="text-xs text-red-600 mb-3">
+                            A nova senha deve ter no mínimo 6 caracteres.
+                        </p>
+                        <form id="form-change-password" class="space-y-3">
+                            <div>
+                                <label for="profile-new-password" class="block text-sm font-medium text-gray-700">Nova Senha</label>
+                                <input type="password" id="profile-new-password" required minlength="6"
+                                    class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-red-500 focus:ring-red-500 p-2 border text-sm">
+                            </div>
+                            <div>
+                                <label for="profile-confirm-password" class="block text-sm font-medium text-gray-700">Confirmar Nova Senha</label>
+                                <input type="password" id="profile-confirm-password" required minlength="6"
+                                    class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-red-500 focus:ring-red-500 p-2 border text-sm">
+                            </div>
+                            <button type="submit" class="w-full flex justify-center py-2 px-3 border border-transparent text-sm font-medium rounded-lg text-white bg-red-600 hover:bg-red-700 shadow-md">
+                                <i class="fas fa-lock mr-2"></i> Alterar Senha
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            `;
+            // Anexa eventos ao modal
+            document.getElementById('form-personal-name').onsubmit = savePersonalName;
+            document.getElementById('form-change-password').onsubmit = changePassword;
+        }
 
         // --- NOVA FUNÇÃO PARA AVATAR/IMAGEM DE PERFIL ---
         function getUserAvatar(user) {
@@ -1544,14 +1580,19 @@
                 { id: 'dashboard', name: 'Dashboard', icon: 'fa-chart-line' }, // 1º child -> Azul
                 { id: 'cadastro', name: 'Cadastro', icon: 'fa-box' }, // 2º child -> Roxa
                 { id: 'pesquisa', name: 'Pesquisa', icon: 'fa-search' }, // 3º child -> Verde Água
-                { id: 'settings', name: 'Configurações', icon: 'fa-cog' } // 4º child -> Laranja
+                // Removido 'my-profile' daqui. 'settings' agora é o 4º
+                { id: 'settings', name: 'Configurações', icon: 'fa-cog', adminOnly: true } // 4º child -> Laranja
             ];
             
+            // Filtra as abas para o usuário atual
             const tabs = allTabs.filter(tab => {
                 if (!currentUser) return false;
-                if (currentUser.role === 'admin') return true;	
-                if (currentUser.permissions) return currentUser.permissions[tab.id] === true;
-                return tab.id === 'dashboard' || tab.id === 'pesquisa';
+                if (tab.id === 'settings' && currentUser.role !== 'admin') {
+                    // Permite a aba Settings apenas para Admin.
+                    return false;
+                }
+                // Permite acesso se for admin OU se tiver a permissão específica
+                return currentUser.role === 'admin' || (currentUser.permissions && currentUser.permissions[tab.id] === true);
             });
             
             const tabLinks = tabs.map(tab => {
@@ -1560,11 +1601,6 @@
                 const isChecked = isActive ? 'checked' : ''; 
                 
                 let iconClass = tab.icon;
-                if (tab.id === 'dashboard') iconClass = 'fa-chart-line';
-                else if (tab.id === 'cadastro') iconClass = 'fa-box';
-                else if (tab.id === 'pesquisa') iconClass = 'fa-search';
-                else if (tab.id === 'settings') iconClass = 'fa-cog';
-
 
                 return `
                     <label class="radio-label" onclick="updateState('page', '${tab.id}')">
@@ -1612,8 +1648,8 @@
                                 <span class="text-sm font-medium text-gray-600 hidden sm:inline">
                                     Olá, ${currentUser.name}
                                 </span>
-                                <!-- Botão de Perfil Pessoal (Chama o Modal) -->
-                                <button onclick="renderProfileModal()" class="text-gray-500 hover:text-green-main transition-colors p-1 rounded-full hover:bg-gray-100" title="Meu Perfil / Gerenciar Senha">
+                                <!-- BOTÃO AGORA CHAMA O MODAL DE PERFIL -->
+                                <button onclick="showProfileModal()" class="text-gray-500 hover:text-green-main transition-colors p-1 rounded-full hover:bg-gray-100" title="Meu Perfil / Gerenciar Senha">
                                     ${getUserAvatar(currentUser)}
                                 </button>
                                 <button onclick="handleLogout()" class="text-gray-500 hover:text-red-500 transition-colors p-1 rounded-full hover:bg-gray-100" title="Sair do Sistema">
@@ -1647,10 +1683,9 @@
         }
         
         function renderLogin() {
-            // [NOVO] Recupera o email salvo
-            const savedEmail = localStorage.getItem('rememberedEmail') || '';
-            const savedPassword = localStorage.getItem('rememberedPassword') || '';
-            const rememberMeChecked = savedEmail || savedPassword ? 'checked' : '';
+            // [NOVO] Recupera o valor salvo (pode ser email ou username)
+            const savedLogin = localStorage.getItem('rememberedLogin') || '';
+            const rememberMeChecked = savedLogin ? 'checked' : '';
             
             let content;
             if (currentLoginView === 'login') {
@@ -1658,36 +1693,36 @@
                     <div class="text-center">
                         <img src="https://usinapitangueiras.com.br/wp-content/uploads/2020/04/usina-pitangueiras-logo.png" alt="Logo Usina Pitangueiras"	
                             class="mx-auto h-20 w-auto mb-4"	
-                            onerror="this.onerror=null; this.src='https://placehold.co/150x80/000000/FFFFFF?text=Logo'; this.alt='Logo Placeholder'">
+                            onerror="this.onerror=null; this.src='https://placehold.co/150x80/40800c/FFFFFF?text=Logo'; this.alt='Logo Placeholder'">
                         <h2 class="text-3xl font-extrabold text-gray-900">
                             Acesso ao Sistema
                         </h2>
                         <p class="mt-2 text-sm text-gray-600">
-                            Use seu email e senha para continuar
+                            Use seu email ou nome de usuário e senha para continuar
                         </p>
                     </div>
                     <form id="login-form" class="mt-8 space-y-6">
-                        <input type="email" id="email" placeholder="Email (Acesso Interno)" required	
+                        <input type="text" id="login-input" placeholder="Email ou Nome de Usuário" required	
                             class="appearance-none relative block w-full px-4 py-3 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-lg focus:outline-none focus:ring-green-main focus:border-green-main focus:z-10 sm:text-sm shadow-sm"
-                            value="${savedEmail}"
+                            value="${savedLogin}"
                         >
                         <div class="relative">
                             <input type="password" id="password" placeholder="Senha" required	
                                 class="appearance-none relative block w-full px-4 py-3 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-lg focus:outline-none focus:ring-green-main focus:border-green-main focus:z-10 sm:text-sm shadow-sm pr-10"
-                                value="${savedPassword}"
+                                value=""
                             >
                             <button type="button" id="toggle-password" class="absolute inset-y-0 right-0 px-3 flex items-center text-gray-500 hover:text-gray-700 focus:outline-none" title="Mostrar/Ocultar Senha">
                                 <i id="toggle-password-icon" class="fas fa-eye"></i>
                             </button>
                         </div>
                         
-                        <!-- NOVO: Checkbox Lembrar Email e Senha -->
+                        <!-- NOVO: Checkbox Lembrar Login -->
                         <div class="flex items-center justify-between">
                             <div class="flex items-center">
                                 <input id="remember-me" name="remember-me" type="checkbox" ${rememberMeChecked}
                                     class="h-4 w-4 text-green-main border-gray-300 rounded focus:ring-green-main">
                                 <label for="remember-me" class="ml-2 block text-sm text-gray-900">
-                                    Lembrar E-mail e Senha
+                                    Lembrar Login
                                 </label>
                             </div>
                         </div>
@@ -1711,11 +1746,11 @@
             }
 
             return `
-                <!-- Fundo BRANCO extremo para visual futurístico -->
-                <div class="flex items-center justify-center min-h-screen bg-white">
-                    <div class="w-full max-w-md p-8 space-y-8 bg-white/95 backdrop-blur-sm rounded-xl shadow-2xl border border-gray-100">
+                <!-- Fundo escuro para visual futurístico -->
+                <div class="flex items-center justify-center min-h-screen bg-gray-900">
+                    <div class="w-full max-w-md p-8 space-y-8 bg-white/95 backdrop-blur-sm rounded-xl shadow-2xl border border-green-main/30">
                         ${content}
-                        <p class="text-xs text-center text-black font-extrabold">
+                        <p class="text-xs text-center text-gray-500">
                             Usina Pitangueiras - "A ENERGIA QUE MOVE A REGIÃO"
                         </p>
                     </div>
@@ -1740,7 +1775,7 @@
                         >
                     </div>
                     <div>
-                        <input type="email" name="solicitar-email" placeholder="Email" required	
+                        <input type="email" name="solicitar-email" placeholder="Email (obrigatório para solicitação)" required	
                             class="appearance-none relative block w-full px-4 py-3 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-lg focus:outline-none focus:ring-green-main focus:border-green-main sm:text-sm shadow-sm"
                         >
                     </div>
@@ -1773,7 +1808,7 @@
         
         function renderLoadingScreen() {
             return `
-                <div class="flex flex-col items-center justify-center min-h-screen bg-white">
+                <div class="flex flex-col items-center justify-center min-h-screen bg-gray-900">
                     <!-- Imagem Inteira e Transição Suave (não mais em círculo) -->
                     <img src="https://usinapitangueiras.com.br/wp-content/uploads/2020/04/usina-pitangueiras-logo.png" alt="Logo Usina Pitangueiras"	
                         class="h-40 w-auto mb-10 loader-logo-full"	
@@ -2434,16 +2469,11 @@
                     <div class="lg:col-span-2">
                         <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center mb-4 gap-2">
                             <h4 class="text-lg font-semibold text-gray-800">Registros Ativos (Total: ${dbRegistros.length})</h4>
-                            <!-- Botão de Exportação -->
-                            <button onclick="exportGeralDataToXLSX()" class="py-2 px-3 border border-transparent text-sm font-medium rounded-lg text-white bg-blue-500 hover:bg-blue-600 shadow-md flex-shrink-0">
-                                <i class="fas fa-file-export mr-2"></i> Exportar XLSX
-                            </button>
+                            <input type="text" id="geral-search-input" value="${geralSearch}"	
+                                oninput="handleSearchInput(this, 'geralSearch', 1)"	
+                                placeholder="Buscar Código, Série ou Frota..."	
+                                class="rounded-md border-gray-300 shadow-sm focus:border-green-main focus:ring-green-main p-2 border text-sm w-full sm:w-1/2">
                         </div>
-                        <input type="text" id="geral-search-input" value="${geralSearch}"	
-                            oninput="handleSearchInput(this, 'geralSearch', 1)"	
-                            placeholder="Buscar Código, Série ou Frota..."	
-                            class="rounded-md border-gray-300 shadow-sm focus:border-green-main focus:ring-green-main p-2 border text-sm w-full sm:w-1/2 mb-4">
-
                         <div class="bg-white border rounded-xl shadow-inner overflow-x-auto">
                             <table class="min-w-full divide-y divide-gray-200">
                                 <thead class="bg-gray-50">
@@ -2575,22 +2605,20 @@
             const isAdmin = currentUser && currentUser.role === 'admin';
             
             const tabs = [
-                { id: 'my-profile', name: 'Meu Perfil', icon: 'fa-user' }, // MANTIDA PARA REDIRECIONAMENTO/LOGICA DE ABA INTERNA
+                // Removida aba 'my-profile'
                 { id: 'system', name: 'Mapeamento', icon: 'fa-sitemap' },
                 { id: 'users', name: 'Usuários', icon: 'fa-users', requiredRole: 'admin' },
             ];
 
+            // Se for admin, a aba 'Mapeamento' (system) é o default.
+            const defaultTab = 'system';
             const filteredTabs = tabs.filter(tab => !tab.requiredRole || (tab.requiredRole === 'admin' && isAdmin));
 
             const tabNav = filteredTabs.map(tab => {
                 const isActive = currentSettingTab === tab.id;
                 const activeClass = isActive ? 'text-green-main border-green-main font-semibold' : 'text-gray-500 border-transparent hover:text-green-main';
-                
-                // Ignoramos a aba 'my-profile' na navegação principal das Configurações, pois ela é um modal agora
-                if (tab.id === 'my-profile') return ''; 
-
                 return `
-                    <a href="#settings/${tab.id}" class="py-2 px-4 border-b-2 ${activeClass} transition-colors text-sm sm:text-base flex items-center space-x-2">
+                    <a href="#settings/${tab.id}" onclick="updateState('settingTab', '${tab.id}')" class="py-2 px-4 border-b-2 ${activeClass} transition-colors text-sm sm:text-base flex items-center space-x-2">
                         <i class="fas ${tab.icon}"></i>
                         <span>${tab.name}</span>
                     </a>
@@ -2598,24 +2626,6 @@
             }).join('');
             
             let content = '';
-            
-            // Se a aba for my-profile, re-direcionamos para o default 'system' se for admin, ou 'acesso negado'
-            if (currentSettingTab === 'my-profile') {
-                if (isAdmin) {
-                    currentSettingTab = 'system';
-                } else {
-                    // Usuário não-admin não tem acesso a Configurações, mas o botão de perfil abre o modal
-                    return `
-                        <div class="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
-                            <h2 class="text-3xl font-bold text-gray-900 mb-6 text-center">Configurações do Sistema</h2>
-                            <div class="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
-                                <p class="p-6 text-red-500 font-semibold">Acesso negado. Esta área é restrita.</p>
-                            </div>
-                        </div>
-                    `;
-                }
-            }
-            
             switch (currentSettingTab) {
                 case 'system':
                     content = renderSettingsSystem();
@@ -2627,7 +2637,7 @@
                     }
                     break;
                 default:
-                    currentSettingTab = 'system';
+                    currentSettingTab = defaultTab; // Redireciona default
                     content = renderSettingsSystem();
             }
 
@@ -2642,7 +2652,9 @@
                 </div>
             `;
         }
-
+        
+        // Removida renderSettingsMyProfile() pois foi movida para o Modal
+        
         function renderSettingsSystem() {
             const currentMap = settings.letterMap;
             const nextIndex = settings.nextIndex;
@@ -2697,6 +2709,8 @@
                         form.reset();
                         document.getElementById('user-id').value = '';
                         document.getElementById('user-form-title').textContent = 'Novo Perfil de Usuário';
+                        // Garante que o campo de senha é visível para novo cadastro
+                        document.getElementById('user-password-field').classList.remove('hidden');
                     };
                 }
             }
@@ -2714,11 +2728,16 @@
                 const isMainAdmin = u.username === ADMIN_PRINCIPAL_EMAIL;
                 const isCurrent = currentUser.email === u.username;
                 const canEditDelete = !isMainAdmin;
+                
+                const loginMethod = u.customUsername ? u.customUsername : u.username;
 
                 return `
                     <tr class="hover:bg-gray-50 border-b ${isCurrent ? 'bg-indigo-50/50' : ''}">
                         <td class="px-4 py-2 text-sm font-medium text-gray-900">${u.name} ${isCurrent ? '<span class="text-xs text-indigo-500">(Você)</span>' : ''}</td>
-                        <td class="px-4 py-2 text-sm text-gray-700">${u.username}</td>
+                        <td class="px-4 py-2 text-sm text-gray-700 font-mono break-words-all min-w-0">
+                            ${loginMethod} 
+                            ${u.customUsername ? '<span class="text-xs text-green-main">(User Login)</span>' : '<span class="text-xs text-blue-500">(Email Login)</span>'}
+                        </td>
                         <td class="px-4 py-2 text-sm font-semibold ${u.role === 'admin' ? 'text-green-main' : 'text-blue-600'}">${u.role.toUpperCase()}</td>
                         <td class="px-4 py-2 whitespace-nowrap text-sm font-medium space-x-2">
                             <button onclick="loadUserForEdit('${u.id}')" ${canEditDelete ? '' : 'disabled'} class="text-indigo-600 hover:text-indigo-900 p-1 rounded-full hover:bg-indigo-50 ${canEditDelete ? '' : 'opacity-50 cursor-not-allowed'}" title="Editar Perfil">
@@ -2747,12 +2766,31 @@
                                 <input type="text" id="user-name" required placeholder="Ex: Maria da Silva"
                                     class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-main focus:ring-green-main p-2 border">
                             </div>
+                            
+                            <!-- NOVO CAMPO: Nome de Usuário (Opcional, Login Principal) -->
                             <div>
-                                <label for="user-username" class="block text-sm font-medium text-gray-700">Username (Email) <span class="text-red-500">*</span></label>
-                                <input type="email" id="user-username" required placeholder="exemplo@empresa.com.br"
+                                <label for="user-custom-username" class="block text-sm font-medium text-gray-700">Nome de Usuário (Login Principal)</label>
+                                <input type="text" id="user-custom-username" placeholder="Ex: mariasilva"
                                     class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-main focus:ring-green-main p-2 border">
-                                <p class="text-xs text-gray-500 mt-1">Deve ser o mesmo email usado para login no Firebase Auth.</p>
                             </div>
+
+                            <!-- CAMPO EMAIL (Login Secundário) -->
+                            <div>
+                                <label for="user-username" class="block text-sm font-medium text-gray-700">Username (Email)</label>
+                                <input type="email" id="user-username" placeholder="exemplo@empresa.com.br"
+                                    class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-main focus:ring-green-main p-2 border">
+                                <p class="text-xs text-gray-500 mt-1">Deve ser um email válido ou deixe em branco se usar Nome de Usuário.</p>
+                                <p class="text-xs text-red-500 mt-1">Se em branco, um email genérico será criado para o Firebase Auth.</p>
+                            </div>
+                            
+                            <!-- NOVO CAMPO: Senha -->
+                            <div id="user-password-field">
+                                <label for="user-password" class="block text-sm font-medium text-gray-700">Senha (Mín. 6 caracteres)</label>
+                                <input type="password" id="user-password" placeholder="Preencha para novo cadastro ou alteração de senha" minlength="6"
+                                    class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-red-500 focus:ring-red-500 p-2 border">
+                                <p class="text-xs text-gray-500 mt-1">Obrigatório para novos usuários.</p>
+                            </div>
+
                             <div>
                                 <label for="user-role" class="block text-sm font-medium text-gray-700">Perfil/Role <span class="text-red-500">*</span></label>
                                 <select id="user-role" required
@@ -2780,7 +2818,7 @@
                                 <thead class="bg-gray-50">
                                     <tr>
                                         <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Nome</th>
-                                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Username (Email)</th>
+                                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase min-w-32">Login Principal</th>
                                         <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Perfil</th>
                                         <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Ações</th>
                                     </tr>
@@ -2821,7 +2859,6 @@
 
         async function handleLogout() {
             try {
-                addLogEntry('LOGOUT', currentUser ? currentUser.email : 'unknown');
                 await signOut(auth);
             } catch (error) {
                 console.error("Erro ao fazer logout:", error);
@@ -2831,30 +2868,64 @@
 
         async function handleLoginSubmit(e) {
             e.preventDefault();
-            const emailInput = document.getElementById('email');
+            const loginInput = document.getElementById('login-input');
             const passwordInput = document.getElementById('password');
             const rememberMeCheckbox = document.getElementById('remember-me');
-            const email = emailInput.value;
+            const loginIdentifier = loginInput.value.trim();
             const password = passwordInput.value;
             
-            // [NOVO] Salvar/Remover Email e Senha no localStorage
+            // [NOVO] Salvar/Remover Login no localStorage
             if (rememberMeCheckbox.checked) {
-                localStorage.setItem('rememberedEmail', email);
-                localStorage.setItem('rememberedPassword', password);
+                localStorage.setItem('rememberedLogin', loginIdentifier);
             } else {
-                localStorage.removeItem('rememberedEmail');
-                localStorage.removeItem('rememberedPassword');
+                localStorage.removeItem('rememberedLogin');
             }
 
             isLoggingIn = true;
             renderApp();	
 
+            let emailToLogin = '';
+            let isCustomLogin = false;
+            
+            // 1. Determinar se é email ou nome de usuário
+            if (isEmail(loginIdentifier)) {
+                emailToLogin = loginIdentifier;
+            } else {
+                // 2. Se não for email, procura por customUsername no Firestore settings
+                const appUser = settings.users.find(u => u.customUsername && u.customUsername.toLowerCase() === loginIdentifier.toLowerCase());
+                
+                if (appUser) {
+                    // Usuário encontrado pelo nome de usuário
+                    emailToLogin = appUser.username;
+                    isCustomLogin = true;
+
+                    // NOTA: Para customUsername (loginPassword armazenado no Firestore), fazemos uma checagem local.
+                    // Isso é menos seguro, mas necessário para suportar a feature solicitada sem depender do Firebase Auth para o username.
+                    if (appUser.loginPassword !== password) {
+                         isLoggingIn = false;
+                         renderApp();
+                         showModal('Erro de Login', 'Nome de usuário ou senha inválidos.', 'error');
+                         return;
+                    }
+                } else {
+                     // Não é email e não é customUsername
+                    isLoggingIn = false;
+                    renderApp();
+                    showModal('Erro de Login', 'Login inválido. Tente novamente com email ou nome de usuário cadastrado.', 'error');
+                    return;
+                }
+            }
+            
+            // 3. Tenta autenticar no Firebase Auth com o emailToLogin
             try {
-                await signInWithEmailAndPassword(auth, email, password);
-                addLogEntry('LOGIN_SUCCESS', email);
+                // O Firebase Auth cuida da checagem de senha para logins baseados em email normal.
+                // Para o login customizado, a checagem de senha já foi feita acima (appUser.loginPassword !== password).
+                
+                await signInWithEmailAndPassword(auth, emailToLogin, password);
+                // Sucesso: onAuthStateChanged cuidará do resto
+                
             } catch (error) {
                 console.error("Erro de login:", error.code);
-                addLogEntry('LOGIN_FAILED', email, { error_code: error.code });
                 isLoggingIn = false;
                 renderApp();	
                 
@@ -2862,7 +2933,7 @@
                 if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
                     msg = 'Email ou senha inválidos.';
                 } else if (error.code === 'auth/invalid-email') {
-                    msg = 'O formato do email é inválido.';
+                    msg = 'O formato do login é inválido.';
                 } else if (error.code === 'auth/operation-not-allowed') {
                     msg = 'Login por Email/Senha não está ativado no Firebase.';
                 }
@@ -3157,8 +3228,6 @@
                         // [CORREÇÃO] Usa appId hardcoded
                         const radioRef = doc(db, `artifacts/${appId}/public/data/radios`, radioId);
                         await updateDoc(radioRef, { status: 'Em Uso' });
-                        
-                        addLogEntry('ASSOCIATION_CREATED', currentUser.email, { codigo: codigoDoEquipamento, frota: equipamento.frota, serie: dbRadios.find(r => r.id === radioId)?.serie });
 
                         showModal('Sucesso!', `Equipamento cadastrado! Código: ${codigoDoEquipamento}`, 'success');
                         
@@ -3185,17 +3254,16 @@
         }
 
         function attachSettingsEvents() {
+            // Removido attachSettingsMyProfileEvents daqui
             if (currentSettingTab === 'system') {
                 attachSettingsSystemEvents();
             } else if (currentSettingTab === 'users' && currentUser && currentUser.role === 'admin') {
                 attachSettingsUsersEvents(); 
             }
-            // A tela de perfil agora é um modal (renderProfileModal)
         }
         
-        function attachSettingsMyProfileEvents() {
-             // Este é um stub, pois a lógica foi movida para o renderProfileModal
-        }
+        // Removida attachSettingsMyProfileEvents()
+
         
         function attachSettingsSystemEvents() {
             const form = document.getElementById('form-settings-system');
@@ -3228,7 +3296,6 @@
                         settings.nextIndex = newNextIndex;	
                         
                         await saveSettings();	
-                        addLogEntry('SETTINGS_UPDATED', currentUser.email, { type: 'mapping' });
 
                         showModal('Sucesso', 'Mapeamento de letras salvo!', 'success');
                         renderApp();	
@@ -3313,9 +3380,6 @@
                     // [CORREÇÃO] Usa appId hardcoded
                     await setDoc(settingsDocRef, { users: usersFromDB }, { merge: true });
                     hideModal();
-                    
-                    addLogEntry('PERMISSION_UPDATED', currentUser.email, { target_email: user.email });
-
                     // Retorna o modal ao tamanho padrão
                     document.getElementById('global-modal').querySelector('div').classList.remove('max-w-lg');
                     document.getElementById('global-modal').querySelector('div').classList.add('max-w-sm');
@@ -3357,8 +3421,16 @@
                 return;
             }
             
+            // Permissão para Dashboard, Cadastro, Pesquisa, e Settings (se for admin)
+            const isSettingsAdminPage = targetPage === 'settings';
             const canAccessTargetPage = !currentUser || targetPage === 'login' || currentUser.role === 'admin' || (currentUser.permissions && currentUser.permissions[targetPage]);
 
+            if (isSettingsAdminPage && currentUser.role !== 'admin') {
+                 showModal('Acesso Negado', 'Você não tem permissão para acessar a página de Configurações.', 'error');
+                 window.history.pushState(null, null, `#${currentPage}`);	
+                 return;
+            }
+            
             if (!canAccessTargetPage) {
                 showModal('Acesso Negado', 'Você não tem permissão para acessar esta página.', 'error');
                 window.history.pushState(null, null, `#${currentPage}`);	
@@ -3375,9 +3447,9 @@
             }
             else if (targetPage === 'settings' && subTab && subTab !== currentSettingTab) {
                 updateState('settingTab', subTab);
-            } else if (targetPage === 'settings' && !subTab && currentSettingTab !== 'my-profile') {
-                // Se não houver sub-aba, forçamos para "Meu Perfil"
-                updateState('settingTab', 'my-profile');
+            } else if (targetPage === 'settings' && !subTab && currentSettingTab !== 'system') {
+                // Se não houver sub-aba e estiver em settings, forçamos para "Mapeamento"
+                updateState('settingTab', 'system');
             }	
             else {
                 renderApp();	
@@ -3411,10 +3483,10 @@
 
                         if (appUser) {
                             // Usuário aprovado no Firestore, loga no App.
-                            currentUser = { ...appUser, uid: user.uid, email: user.email };
+                            // Adiciona o customUsername ao objeto currentUser para uso no App
+                            currentUser = { ...appUser, uid: user.uid, email: user.email, customUsername: appUser.customUsername || null };
                             isAuthReady = true;
                             isLoggingIn = false;	
-                            addLogEntry('LOGIN_SUCCESS', user.email);
                             await attachFirestoreListeners();	
                         } else {
                             // Usuário autenticado, mas sem perfil no Firestore (não aprovado).
@@ -3478,11 +3550,15 @@
                 
                 const canAccessCurrentPage = currentUser.role === 'admin' || (currentUser.permissions && currentUser.permissions[currentPage]);
 
-                if (!canAccessCurrentPage && currentPage !== 'login') {
-                    // Se tentar acessar uma aba sem permissão, volta para o dashboard
-                    if (currentPage !== 'dashboard') {
-                        showModal('Acesso Negado', 'Você não tem permissão para acessar esta página.', 'error');
-                    }
+                // Se a página for settings e o usuário não for admin, volta para dashboard
+                if (currentPage === 'settings' && currentUser.role !== 'admin') {
+                    currentPage = 'dashboard';
+                    window.location.hash = '#dashboard';
+                    contentHTML += renderDashboard();
+                } 
+                // Se a página não for acessível (baseado nas permissões)
+                else if (!canAccessCurrentPage && currentPage !== 'login') {
+                    showModal('Acesso Negado', 'Você não tem permissão para acessar esta página.', 'error');
                     currentPage = 'dashboard';
                     window.location.hash = '#dashboard';
                     contentHTML += renderDashboard();
@@ -3518,6 +3594,9 @@
                     
                     // [CORREÇÃO] Chamada da função de eventos principal
                     if (currentPage === 'settings') attachSettingsEvents();
+                    
+                    // Anexa eventos ao modal de perfil, se estiver no DOM
+                    // Não é mais necessário renderizar aqui, pois showProfileModal o fará quando aberto.
                 }
             }
             
@@ -3552,19 +3631,12 @@
         
         window.onhashchange = handleHashChange;
         
-        // [CORREÇÃO CRÍTICA] Expondo as funções de modal para o escopo global
-        window.showModal = showModal;
-        window.showConfirmModal = showConfirmModal;
-        window.hideModal = hideModal;
-        
-        window.renderProfileModal = renderProfileModal;
-        window.savePersonalName = savePersonalName;
-        window.changePassword = changePassword;
-
         window.handleLogout = handleLogout;
         window.handleSearchInput = handleSearchInput;
         window.loadRadioForEdit = loadRadioForEdit;
         window.loadEquipamentoForEdit = loadEquipamentoForEdit;
+        window.showConfirmModal = showConfirmModal;
+        window.hideModal = hideModal;
         window.handleImport = handleImport;
         window.showPermissionModal = showPermissionModal;
         window.renderApp = renderApp;	
@@ -3580,14 +3652,15 @@
         window.setRadioPage = setRadioPage;
         window.setEquipamentoPage = setEquipamentoPage;
         window.setGeralPage = setGeralPage;
-        
-        // NOVO: Exportação
-        window.exportGeralDataToXLSX = exportGeralDataToXLSX;
 
         // NOVO: Solicitar Acesso
         window.handleSolicitarAcesso = handleSolicitarAcesso; // Exportado para uso no formulário de solicitação
         
-        // NOVO: Informações de Importação (Constantes)
+        // NOVO: Perfil Modal
+        window.showProfileModal = showProfileModal;
+        window.hideProfileModal = hideProfileModal;
+
+        // NOVO: Informações de Importação
         window.RADIO_IMPORT_INFO = RADIO_IMPORT_INFO;
         window.EQUIPAMENTO_IMPORT_INFO = EQUIPAMENTO_IMPORT_INFO;
 

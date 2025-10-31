@@ -31,7 +31,6 @@ import {
 let app, auth, db;
 
 // [CORREÇÃO] Usando a constante FIREBASE_CONFIG e o appId hardcoded
-// Exatamente como no seu Teste.test.html original
 const FIREBASE_CONFIG = {
     apiKey: "AIzaSyCb0Dhh_eMHrs_Dyg1wS5nbMu1U6tKHa3A",
     authDomain: "gestaoradios-58b0a.firebaseapp.com",
@@ -56,6 +55,8 @@ let currentSettingTab = 'system';
 let isLoggingIn = false;
 // NOVO: Armazena usuários aguardando aprovação
 let pendingUsers = [];
+// 🌟 NOVO: Armazena duplicidades críticas
+let duplicities = [];
 
 // Paginação e Busca
 let radioPage = 1, equipamentoPage = 1, geralPage = 1;
@@ -108,6 +109,70 @@ const EQUIPAMENTO_IMPORT_INFO = `
     </ul>
     <p class="mt-2"><span class="font-semibold">Coluna Opcional:</span> Gestor</p>
 `;
+
+// 🌟 NOVO: Função central de verificação de duplicidades
+function checkDuplicities() {
+    const newDuplicities = [];
+
+    // 1. Verificar Duplicidades de Rádios (Número de Série)
+    const radioSeriesCount = {};
+    dbRadios.forEach(r => {
+        const serie = r.serie;
+        if (serie) {
+            if (!radioSeriesCount[serie]) {
+                radioSeriesCount[serie] = [];
+            }
+            radioSeriesCount[serie].push(r);
+        }
+    });
+
+    Object.values(radioSeriesCount).forEach(list => {
+        if (list.length > 1) {
+            list.forEach(r => {
+                newDuplicities.push({
+                    id: r.id,
+                    type: 'Rádio',
+                    field: 'Número de Série',
+                    value: r.serie,
+                    createdAt: r.createdAt,
+                    collection: 'radios'
+                });
+            });
+        }
+    });
+
+    // 2. Verificar Duplicidades de Equipamentos (Frota)
+    const equipFrotaCount = {};
+    dbEquipamentos.forEach(e => {
+        const frota = e.frota;
+        if (frota) {
+            if (!equipFrotaCount[frota]) {
+                equipFrotaCount[frota] = [];
+            }
+            equipFrotaCount[frota].push(e);
+        }
+    });
+
+    Object.values(equipFrotaCount).forEach(list => {
+        if (list.length > 1) {
+            list.forEach(e => {
+                newDuplicities.push({
+                    id: e.id,
+                    type: 'Equipamento',
+                    field: 'Frota',
+                    value: e.frota,
+                    createdAt: e.createdAt,
+                    collection: 'equipamentos'
+                });
+            });
+        }
+    });
+
+    // Filtra duplicidades únicas e ordena por data de criação para melhor visualização
+    duplicities = newDuplicities.filter((item, index, self) =>
+        index === self.findIndex((t) => (t.id === item.id))
+    ).sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt)); 
+}
 
 
 // --- Funções de Utilitário e Estado ---
@@ -189,6 +254,9 @@ async function attachFirestoreListeners() {
             
             collectionsToSync[colName](data);	
             
+            // 🌟 NOVO: Verificar duplicidades após cada atualização do banco
+            checkDuplicities();
+            
             if(isAuthReady) {
                 renderApp();
             }
@@ -236,7 +304,6 @@ async function saveSettings() {
             users: settings.users // Salva a lista de usuários
         }, { merge: true });
     } catch (e) {
-        console.error("Erro ao salvar 'settings/config':", e);
         showModal('Erro', 'Não foi possível salvar as configurações no banco de dados. Verifique a permissão do Administrador Principal.', 'error');
     }
 }
@@ -453,6 +520,44 @@ async function toggleRecordAtivo(collectionName, id) {
         showModal('Erro', 'Ocorreu um erro durante a operação.', 'error');
     }
 }
+
+// 🌟 NOVO: Função para excluir uma duplicidade (exceção à regra)
+async function deleteDuplicity(collectionName, id) {
+    if (!db || !appId) {
+        showModal('Erro', 'Conexão com o banco de dados perdida.', 'error');
+        return;
+    }
+
+    // Bloqueia a exclusão se o item estiver vinculado a um registro ativo
+    const isLinked = collectionName === 'radios' 
+        ? dbRegistros.some(reg => reg.radioId === id)
+        : dbRegistros.some(reg => reg.equipamentoId === id);
+
+    if (isLinked) {
+        showModal('Ação Bloqueada', 'Não é possível excluir este item. Ele está atualmente vinculado a um registro ativo.', 'warning');
+        return;
+    }
+
+    // [CORREÇÃO] Usa appId hardcoded
+    const colPath = `artifacts/${appId}/public/data/${collectionName}`;
+
+    try {
+        // Tenta excluir o documento
+        await deleteDoc(doc(db, colPath, id));
+
+        showModal('Sucesso', 'Duplicidade removida com sucesso! A integridade dos dados será verificada novamente.', 'success');
+        
+        // Força nova verificação e renderização
+        checkDuplicities(); 
+        renderApp();
+        hideDuplicityModal();
+        
+    } catch (error) {
+        console.error("Erro ao excluir duplicidade:", error);
+        showModal('Erro', 'Ocorreu um erro ao excluir a duplicidade.', 'error');
+    }
+}
+
 
 // --- Funções de CRUD de Usuário (ATUALIZADO PARA CUSTOM LOGIN) ---
 
@@ -710,7 +815,6 @@ async function approveUser(pendingId, name, email) {
         renderApp(); 
         
     } catch (e) {
-        console.error("Erro ao aprovar usuário:", e);
         showModal('Erro', 'Não foi possível aprovar o usuário.', 'error');
     }
 }
@@ -734,7 +838,6 @@ async function rejectUser(pendingId, name) {
         renderApp(); 
         
     } catch (e) {
-        console.error("Erro ao negar usuário:", e);
         showModal('Erro', 'Não foi possível negar o acesso.', 'error');
     }
 }
@@ -795,7 +898,6 @@ async function handleSolicitarAcesso(e) {
         updateState('loginView', 'login');
     
     } catch (error) {
-        console.error("Erro ao solicitar acesso:", error);
         showModal('Erro', 'Ocorreu um erro ao enviar sua solicitação.', 'error');
     }
 }
@@ -865,371 +967,68 @@ window.rejectUserWrapper = (id, name) => {
 };
 window.renderPendingApprovalsModal = renderPendingApprovalsModal;
 
-// --- FIM NOVAS FUNÇÕES: Gerenciamento de Pendências ---
 
-// --- NOVAS FUNÇÕES: Gerenciamento Pessoal (Meu Perfil) ---
+// 🌟 NOVO: Funções de Gerenciamento de Duplicidades 🌟
 
-async function savePersonalName(e) {
-    e.preventDefault();
-    const newName = document.getElementById('profile-name').value.trim();
-    if (!newName) {
-        showModal('Erro', 'O nome de exibição não pode ser vazio.', 'error');
-        return;
-    }
+function renderDuplicityModalContent() {
+    const modalContent = document.getElementById('duplicity-modal-content');
     
-    const usersFromDB = settings.users;
-    const userIndex = usersFromDB.findIndex(u => u.username === currentUser.email);
-
-    if (userIndex === -1) {
-        showModal('Erro', 'Seu perfil não foi encontrado no banco de dados.', 'error');
+    if (duplicities.length === 0) {
+        modalContent.innerHTML = '<p class="text-green-600 text-center font-semibold">Parabéns! Não foram encontradas duplicidades críticas.</p>';
         return;
     }
 
-    usersFromDB[userIndex].name = newName;
-    
-    const settingsDocRef = doc(db, "artifacts", appId, "public", "data", "settings", "config");
-    try {
-        await setDoc(settingsDocRef, { users: usersFromDB }, { merge: true });
-        // Atualiza o estado local do usuário e força renderização
-        currentUser.name = newName;
-        showModal('Sucesso', 'Nome de exibição atualizado com sucesso!', 'success');
-        hideProfileModal();
-        renderApp();
-    } catch (e) {
-        console.error("Erro ao salvar nome pessoal:", e);
-        showModal('Erro', 'Não foi possível salvar o seu nome.', 'error');
-    }
-}
-
-async function changePassword(e) {
-    e.preventDefault();
-    const newPassword = document.getElementById('profile-new-password').value;
-    const confirmPassword = document.getElementById('profile-confirm-password').value;
-
-    if (newPassword.length < 6) {
-        showModal('Erro', 'A nova senha deve ter pelo menos 6 caracteres.', 'error');
-        return;
-    }
-    if (newPassword !== confirmPassword) {
-        showModal('Erro', 'As senhas não coincidem.', 'error');
-        return;
-    }
-    
-    const user = auth.currentUser;
-    if (!user) {
-        showModal('Erro', 'Usuário não autenticado.', 'error');
-        return;
-    }
-
-    try {
-        // O Firebase Auth cuida da reautenticação se necessário.
-        await updatePassword(user, newPassword);
-        showModal('Sucesso', 'Senha alterada com sucesso! Você pode ser solicitado a fazer login novamente.', 'success');
-        document.getElementById('form-change-password').reset();
-        hideProfileModal();
-    } catch (error) {
-        console.error("Erro ao trocar senha:", error.code);
-        let msg = 'Ocorreu um erro ao trocar a senha.';
-        if (error.code === 'auth/requires-recent-login') {
-            msg = 'A troca de senha falhou. Por favor, faça login novamente e tente de novo.';
-        } else if (error.code === 'auth/weak-password') {
-            msg = 'A senha é muito fraca. Escolha uma senha mais forte.';
+    const groups = duplicities.reduce((acc, item) => {
+        const key = `${item.collection}-${item.value}`;
+        if (!acc[key]) {
+            acc[key] = { items: [], collection: item.collection, field: item.field, value: item.value };
         }
-        showModal('Erro de Senha', msg, 'error');
-    }
-}
-
-// --- FIM NOVAS FUNÇÕES: Gerenciamento Pessoal (Meu Perfil) ---
-
-// --- Funções de Importação ---
-// ... (resto das funções de importação)
-
-function handleImport(collection, event) {
-    const file = event.target.files[0];
-    if (!file) return;
-
-    const reader = new FileReader();
+        acc[key].items.push(item);
+        return acc;
+    }, {});
     
-    reader.onload = function(e) {
-        const data = e.target.result;
-        let parsedData = [];
+    let html = '';
 
-        if (file.name.endsWith('.csv')) {
-            Papa.parse(data, {
-                header: true, skipEmptyLines: true,
-                complete: function(results) {
-                    processImportedData(collection, results.data);
-                }
-            });
-        } else if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
-            const workbook = XLSX.read(data, { type: 'binary' });
-            const firstSheetName = workbook.SheetNames[0];
-            const worksheet = workbook.Sheets[firstSheetName];
-            parsedData = XLSX.utils.sheet_to_json(worksheet);
-            processImportedData(collection, parsedData);
-        } else {
-            showModal('Erro', 'Formato de arquivo não suportado. Use CSV ou XLSX.', 'error');
-        }
-    };
-    
-    if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) reader.readAsBinaryString(file);
-    else reader.readAsText(file);
-}
+    Object.values(groups).forEach(group => {
+        const typeLabel = group.collection === 'radios' ? 'Rádio (Série)' : 'Equipamento (Frota)';
+        const itemsList = group.items.map(item => {
+            const date = new Date(item.createdAt).toLocaleString();
+            const isLinked = dbRegistros.some(reg => 
+                (item.collection === 'radios' && reg.radioId === item.id) || 
+                (item.collection === 'equipamentos' && reg.equipamentoId === item.id)
+            );
+            const actionButton = isLinked 
+                ? `<span class="text-xs font-semibold text-red-500 bg-red-100 px-2 py-1 rounded-full">EM USO</span>`
+                : `<button onclick="deleteDuplicityWrapper('${item.collection}', '${item.id}', '${item.value}')" class="px-3 py-1 text-xs bg-red-500 text-white rounded-lg hover:bg-red-600 shadow-md transition-colors">
+                    Remover Este
+                   </button>`;
 
-async function processImportedData(collectionName, data) {
-    if (!db || !appId) {
-        showModal('Erro', 'Conexão com o banco de dados perdida.', 'error');
-        return;
-    }
-
-    const newRecords = [];
-    let currentDb = collectionName === 'radios' ? dbRadios : dbEquipamentos;
-    let ignoredCount = 0;
-
-    for (const item of data) {
-        let record = { createdAt: new Date().toISOString(), ativo: true };
-        let isDuplicate = false;
-        
-        if (collectionName === 'radios') {
-            const serie = item['Numero de Serie'] || item['Numero deSerie'] || item['serie'];
-            const modelo = item['Modelo'] || item['Modelo de Radio'] || item['modelo'];
-            
-            if (!serie || !modelo) continue;
-            
-            record.serie = String(serie).trim();
-            record.modelo = String(modelo).trim();
-            record.status = 'Disponível';	
-
-            // [CORREÇÃO] Checagem de duplicidade no cache local
-            if (currentDb.some(r => r.serie === record.serie)) {
-                console.warn(`Rádio duplicado (cache local): ${record.serie}. Ignorando.`);
-                isDuplicate = true;
-            }
-            
-        } else if (collectionName === 'equipamentos') {
-            const frota = item['Frota'];
-            const grupo = item['Grupo'];
-            const modeloEq = item['Modelo do Equipamento'] || item['Modelo Equipamento'];
-            const subgrupo = item['Subgrupo'] || item['Descricao do Equipamento'] || item['Descricao Equipamento'];
-            const gestor = item['Gestor'] || 'Sem Gestor';
-            
-            if (!frota || !grupo || !modeloEq || !subgrupo || !GROUPS.includes(String(grupo).trim())) {
-                console.warn('Registro de equipamento inválido:', item);
-                continue;
-            }
-
-            record.frota = String(frota).trim();
-            record.grupo = String(grupo).trim();
-            record.modelo = String(modeloEq).trim();
-            record.subgrupo = String(subgrupo).trim();	
-            record.gestor = String(gestor).trim();
-            
-            // [CORREÇÃO] Checagem de duplicidade no cache local
-            if (currentDb.some(r => r.frota === record.frota)) {
-                console.warn(`Equipamento duplicado (cache local): ${record.frota}. Ignorando.`);
-                isDuplicate = true;
-            }
-        }
-
-        if (isDuplicate) {
-            ignoredCount++;
-        } else {
-            newRecords.push(record);
-        }
-    }
-
-    if (newRecords.length > 0) {
-        // [CORREÇÃO] Usa appId hardcoded
-        const colPath = `artifacts/${appId}/public/data/${collectionName}`;
-        const colRef = collection(db, colPath);
-        const batch = writeBatch(db);
-        
-        newRecords.forEach(record => {
-            const newDocRef = doc(colRef);	
-            batch.set(newDocRef, record);
-        });
-
-        try {
-            await batch.commit();
-            let msg = `${newRecords.length} registros de ${collectionName} importados com sucesso.`;
-            if (ignoredCount > 0) {
-                msg += `<br>(${ignoredCount} duplicatas ignoradas.)`;
-            }
-            showModal('Importação Concluída', msg, 'success');
-        } catch (error) {
-            console.error("Erro ao salvar importação em lote:", error);
-            showModal('Erro de Importação', 'Ocorreu um erro ao salvar os dados no banco de dados.', 'error');
-        }
-    } else {
-        let msg = 'Nenhum registro novo válido foi encontrado no arquivo.';
-        if (ignoredCount > 0) {
-            msg += `<br>(${ignoredCount} duplicatas ignoradas.)`;
-        }
-        showModal('Importação', msg, 'info');
-    }
-}
-
-// --- Funções de Modal ---
-function showModal(title, message, type = 'info') {
-    const modal = document.getElementById('global-modal');
-    const titleEl = document.getElementById('modal-title');
-    const messageEl = document.getElementById('modal-message');
-    const actionsEl = document.getElementById('modal-actions');
-
-    // Volta o tamanho do modal para o padrão
-    modal.querySelector('div').classList.remove('max-w-lg');
-    modal.querySelector('div').classList.add('max-w-sm');
-
-    titleEl.textContent = title;
-    messageEl.innerHTML = message.replace(/\n/g, '<br>');
-    
-    let titleClass = 'text-gray-800';
-    // Usando a nova cor principal
-    if (type === 'success') titleClass = 'text-green-main';
-    if (type === 'error') titleClass = 'text-red-600';
-    if (type === 'warning') titleClass = 'text-yellow-600';
-    if (type === 'info') titleClass = 'text-blue-600'; // Adicionando cor para info
-    titleEl.className = `text-xl font-bold mb-3 ${titleClass}`;
-
-    actionsEl.innerHTML = `
-        <button onclick="hideModal()" class="px-3 py-1.5 text-sm bg-green-main text-white font-semibold rounded-lg hover:bg-green-700 transition-colors shadow-md">
-            OK
-        </button>
-    `;
-    modal.classList.remove('hidden');
-    modal.classList.add('flex');
-}
-
-function showConfirmModal(title, message, callback) {
-    const modal = document.getElementById('global-modal');
-    const titleEl = document.getElementById('modal-title');
-    const messageEl = document.getElementById('modal-message');
-    const actionsEl = document.getElementById('modal-actions');
-
-    // Volta o tamanho do modal para o padrão
-    modal.querySelector('div').classList.remove('max-w-lg');
-    modal.querySelector('div').classList.add('max-w-sm');
-
-    titleEl.textContent = title;
-    messageEl.innerHTML = message.replace(/\n/g, '<br>');
-    titleEl.className = `text-xl font-bold mb-3 text-red-600`;	
-
-    actionsEl.innerHTML = `
-        <button onclick="hideModal()" class="px-3 py-1.5 text-sm bg-gray-200 text-gray-700 font-semibold rounded-lg hover:bg-gray-300 transition-colors shadow-md">
-            Cancelar
-        </button>
-        <button id="confirm-action-btn" class="px-3 py-1.5 text-sm bg-red-600 text-white font-semibold rounded-lg hover:bg-red-700 transition-colors shadow-md">
-            Confirmar
-        </button>
-    `;
-    
-    document.getElementById('confirm-action-btn').onclick = () => {
-        hideModal();
-        callback();	
-    };
-
-    modal.classList.remove('hidden');
-    modal.classList.add('flex');
-}
-
-function hideModal() {
-    document.getElementById('global-modal').classList.add('hidden');
-    document.getElementById('global-modal').classList.remove('flex');
-}
-
-// NOVO: Funções para o Modal de Perfil
-function showProfileModal() {
-    renderProfileModalContent();
-    document.getElementById('profile-modal').classList.remove('hidden');
-    document.getElementById('profile-modal').classList.add('flex');
-}
-
-function hideProfileModal() {
-    document.getElementById('profile-modal').classList.add('hidden');
-    document.getElementById('profile-modal').classList.remove('flex');
-}
-
-function renderProfileModalContent() {
-    const modalContent = document.getElementById('profile-modal-content');
-    if (!currentUser) {
-        modalContent.innerHTML = '<p class="text-red-500">Erro: Usuário não logado.</p>';
-        return;
-    }
-    
-    // Layout centralizado para dispositivos móveis
-    modalContent.innerHTML = `
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div class="bg-gray-50 p-4 rounded-xl shadow-inner border border-gray-200">
-                <h4 class="text-xl font-semibold text-gray-800 mb-3 flex items-center">
-                    <i class="fas fa-user-edit mr-2 text-green-main"></i> Gerenciar Nome
-                </h4>
-                <p class="text-xs text-gray-600 mb-3">
-                    Altere o nome que aparece na barra superior.
-                </p>
-                <form id="form-personal-name" class="space-y-3">
-                    <div>
-                        <label for="profile-name" class="block text-sm font-medium text-gray-700">Nome de Exibição Atual</label>
-                        <input type="text" id="profile-name" required value="${currentUser.name}"
-                            class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-main focus:ring-green-main p-2 border text-sm">
+            return `
+                <div class="flex justify-between items-center p-3 border-b border-gray-100 bg-white hover:bg-red-50/50 transition-colors rounded-lg shadow-sm">
+                    <div class="space-y-0.5">
+                        <p class="font-semibold text-gray-800 break-words-all">ID: <span class="font-mono text-xs">${item.id}</span></p>
+                        <p class="text-xs text-gray-600">Criado em: ${date}</p>
                     </div>
-                    <button type="submit" class="w-full flex justify-center py-2 px-3 border border-transparent text-sm font-medium rounded-lg text-white bg-green-main hover:bg-green-700 shadow-md">
-                        <i class="fas fa-save mr-2"></i> Salvar Nome
-                    </button>
-                </form>
-                <div class="mt-4 p-3 bg-white border border-gray-200 rounded-lg text-xs text-gray-700 break-words-all">
-                    <p><span class="font-semibold">Seu Login Principal:</span> ${currentUser.customUsername || currentUser.email}</p>
-                    <p><span class="font-semibold">Seu Perfil:</span> ${currentUser.role.toUpperCase()}</p>
+                    ${actionButton}
                 </div>
+            `;
+        }).join('');
+
+        html += `
+            <div class="bg-red-50 p-4 rounded-xl shadow-inner border border-red-200">
+                <h4 class="text-lg font-bold text-red-700 mb-3">${typeLabel}: ${group.value} (${group.items.length} duplicatas)</h4>
+                <div class="space-y-2">
+                    ${itemsList}
+                </div>
+                <p class="mt-3 text-xs text-red-700 font-semibold">Regra: Mantenha um único registro. Registros "EM USO" não podem ser removidos.</p>
             </div>
-            
-            <div class="bg-gray-50 p-4 rounded-xl shadow-inner border border-red-200">
-                <h4 class="text-xl font-semibold text-gray-800 mb-3 flex items-center">
-                    <i class="fas fa-key mr-2 text-red-600"></i> Alterar Senha
-                </h4>
-                <p class="text-xs text-red-600 mb-3">
-                    A nova senha deve ter no mínimo 6 caracteres.
-                </p>
-                <form id="form-change-password" class="space-y-3">
-                    <div>
-                        <label for="profile-new-password" class="block text-sm font-medium text-gray-700">Nova Senha</label>
-                        <input type="password" id="profile-new-password" required minlength="6"
-                            class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-red-500 focus:ring-red-500 p-2 border text-sm">
-                    </div>
-                    <div>
-                        <label for="profile-confirm-password" class="block text-sm font-medium text-gray-700">Confirmar Nova Senha</label>
-                        <input type="password" id="profile-confirm-password" required minlength="6"
-                            class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-red-500 focus:ring-red-500 p-2 border text-sm">
-                    </div>
-                    <button type="submit" class="w-full flex justify-center py-2 px-3 border border-transparent text-sm font-medium rounded-lg text-white bg-red-600 hover:bg-red-700 shadow-md">
-                        <i class="fas fa-lock mr-2"></i> Alterar Senha
-                    </button>
-                </form>
-            </div>
-        </div>
-    `;
-    // Anexa eventos ao modal
-    document.getElementById('form-personal-name').onsubmit = savePersonalName;
-    document.getElementById('form-change-password').onsubmit = changePassword;
+        `;
+    });
+
+    modalContent.innerHTML = html;
 }
+// ----------------------------------------------------
 
-// --- NOVA FUNÇÃO PARA AVATAR/IMAGEM DE PERFIL ---
-function getUserAvatar(user) {
-    const defaultColor = 'bg-indigo-500';
-    // Pega as iniciais do nome
-    const initials = (user.name || 'NN').split(' ').map(n => n[0]).join('').toUpperCase();
-    // Simula URL de foto (se disponível no objeto user, embora não seja comum no Auth sem provedor social)
-    const photoURL = user.photoURL || null; 
-
-    if (photoURL) {
-        return `<img src="${photoURL}" alt="Avatar de ${user.name}" class="h-8 w-8 rounded-full object-cover shadow-md" onerror="this.onerror=null; this.src='https://placehold.co/32x32/40800c/FFFFFF?text=${initials}';">`;
-    }
-
-    return `
-        <div class="h-8 w-8 rounded-full ${defaultColor} flex items-center justify-center text-white font-bold text-sm shadow-md ring-2 ring-green-main/50">
-            ${initials}
-        </div>
-    `;
-}
 
 // --- Funções de Renderização (HTML) ---
 
@@ -1273,6 +1072,20 @@ function renderTopBar() {
         `;
     }).join('');
 
+    // 🌟 NOVO: Lógica do Sino de Integridade
+    const duplicityCount = duplicities.length;
+    const duplicityBell = duplicityCount > 0 ? `
+        <button onclick="showDuplicityModal()" class="relative text-gray-500 hover:text-red-600 transition-colors p-2 rounded-full hover:bg-red-100" title="Alerta Crítico de Duplicidade de Dados">
+            <i class="fas fa-bell duplicity-bell-active"></i>
+            <span class="absolute top-0 right-0 inline-flex items-center justify-center px-2 py-1 text-xs font-bold leading-none text-red-100 transform translate-x-1/2 -translate-y-1/2 bg-red-600 rounded-full">${duplicityCount}</span>
+        </button>
+    ` : `
+        <button onclick="showDuplicityModal()" class="relative text-gray-500 hover:text-green-main transition-colors p-2 rounded-full hover:bg-gray-100" title="Integridade de Dados (OK)">
+            <i class="fas fa-heart-pulse"></i>
+        </button>
+    `;
+
+
     return `
         <header class="bg-white shadow-lg sticky top-0 z-10 border-b border-gray-100">
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -1290,6 +1103,8 @@ function renderTopBar() {
                     </nav>
                     
                     <div class="flex-1 flex justify-end items-center space-x-4">
+                        
+                        ${duplicityBell}
                         
                         ${currentUser.role === 'admin' ? `
                         <button onclick="renderPendingApprovalsModal()" class="relative text-gray-500 hover:text-yellow-600 transition-colors p-2 rounded-full hover:bg-gray-100" title="Novas Solicitações de Acesso">
@@ -1314,23 +1129,23 @@ function renderTopBar() {
             </div>
         </header>
         <nav class="bg-white border-t border-gray-200 fixed bottom-0 left-0 right-0 z-10 md:hidden shadow-2xl">
-            <div class="flex justify-around">
-                ${tabs.map(tab => {
-                    const isActive = currentPage === tab.id;
-                    const activeClass = isActive ? 'text-green-main tab-active font-semibold' : 'text-gray-500 hover:text-green-main';
-                    // Usando o nome original no mobile
-                    const mobileName = tab.name; 
+                    <div class="flex justify-around">
+                        ${tabs.map(tab => {
+                            const isActive = currentPage === tab.id;
+                            const activeClass = isActive ? 'text-green-main tab-active font-semibold' : 'text-gray-500 hover:text-green-main';
+                            // Usando o nome original no mobile
+                            const mobileName = tab.name; 
 
-                    return `
-                        <a href="#${tab.id}" class="py-3 px-4 flex flex-col items-center space-y-1 ${activeClass} transition-colors border-b-2 border-transparent">
-                            <i class="fas ${tab.icon}"></i>
-                            <span class="text-xs">${mobileName}</span>
-                        </a>
-                    `;
-                }).join('')}
-            </div>
-        </nav>
-        <div class="h-16 md:hidden"></div> `;
+                            return `
+                                <a href="#${tab.id}" class="py-3 px-4 flex flex-col items-center space-y-1 ${activeClass} transition-colors border-b-2 border-transparent">
+                                    <i class="fas ${tab.icon}"></i>
+                                    <span class="text-xs">${mobileName}</span>
+                                </a>
+                            `;
+                        }).join('')}
+                    </div>
+                </nav>
+                <div class="h-16 md:hidden"></div> `;
 }
 
 function renderLogin() {
@@ -1429,7 +1244,7 @@ function renderSolicitarAcesso() {
             </div>
             <div>
                 <input type="tel" name="solicitar-phone" placeholder="Telefone (WhatsApp)" required	
-                    class="appearance-none relative block w-full px-4 py-3 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-lg focus:outline-none focus:ring-green-main focus:border-green-main sm:text-sm shadow-sm"
+                    class="appearance-none relative block w-full px-4 py-3 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-lg focus:outline-none focus:ring-green-main focus:ring-green-main sm:text-sm shadow-sm"
                 >
             </div>
             <div>
@@ -1518,6 +1333,26 @@ function getWarehouseIcon() {
         </svg>
     `;
 }
+
+// --- NOVA FUNÇÃO PARA AVATAR/IMAGEM DE PERFIL ---
+function getUserAvatar(user) {
+    const defaultColor = 'bg-indigo-500';
+    // Pega as iniciais do nome
+    const initials = (user.name || 'NN').split(' ').map(n => n[0]).join('').toUpperCase();
+    // Simula URL de foto (se disponível no objeto user, embora não seja comum no Auth sem provedor social)
+    const photoURL = user.photoURL || null; 
+
+    if (photoURL) {
+        return `<img src="${photoURL}" alt="Avatar de ${user.name}" class="h-8 w-8 rounded-full object-cover shadow-md" onerror="this.onerror=null; this.src='https://placehold.co/32x32/40800c/FFFFFF?text=${initials}';">`;
+    }
+
+    return `
+        <div class="h-8 w-8 rounded-full ${defaultColor} flex items-center justify-center text-white font-bold text-sm shadow-md ring-2 ring-green-main/50">
+            ${initials}
+        </div>
+    `;
+}
+
 
 function renderDashboard() {
     const radioMap = dbRadios.reduce((acc, r) => { acc[r.id] = r; return acc; }, {});
@@ -2491,7 +2326,6 @@ async function handleLogout() {
     try {
         await signOut(auth);
     } catch (error) {
-        console.error("Erro ao fazer logout:", error);
         showModal('Erro', 'Não foi possível sair. Tente novamente.', 'error');
     }
 }
@@ -2555,7 +2389,6 @@ async function handleLoginSubmit(e) {
         // Sucesso: onAuthStateChanged cuidará do resto
         
     } catch (error) {
-        console.error("Erro de login:", error.code);
         isLoggingIn = false;
         renderApp();	
         
@@ -2861,7 +2694,6 @@ function attachCadastroGeralEvents() {
                     await updateDoc(equipamentoRef, { codigo: codigoDoEquipamento });
                     console.log(`Código ${codigoDoEquipamento} salvo no equipamento ${equipamentoId}`);
                 } catch (e) {
-                    console.error("Erro ao salvar código no equipamento:", e);
                     showModal('Erro', 'Não foi possível salvar o novo código no equipamento.', 'error');
                     return;
                 }
@@ -2890,8 +2722,7 @@ function attachCadastroGeralEvents() {
                 if(equipamentoSelect) equipamentoSelect.dispatchEvent(new Event('change'));
             
             } catch (error) {
-                console.error("Erro ao associar registro:", error);
-                showModal('Erro', 'Não foi possível salvar a associação.', 'error');
+                showModal('Erro', 'Ocorreu um erro ao salvar a associação.', 'error');
             }
         };
     }
@@ -3046,7 +2877,6 @@ async function showPermissionModal(userId)
                 renderApp();	
             }
         } catch (e) {
-            console.error("Erro ao salvar permissões:", e);
             showModal('Erro', 'Não foi possível salvar as permissões.', 'error');
         }
     };
@@ -3281,42 +3111,333 @@ function renderApp() {
     }
 }
 
+// --- Funções de Modal e Utilitários (Implementação e Exposição Global) ---
+
+// Funções de Importação (Movemos para o final para garantir que Papa/XLSX estejam carregados)
+function handleImport(collection, event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    
+    reader.onload = function(e) {
+        const data = e.target.result;
+        let parsedData = [];
+
+        if (file.name.endsWith('.csv')) {
+            // Papa está disponível globalmente via CDN no index.html
+            Papa.parse(data, {
+                header: true, skipEmptyLines: true,
+                complete: function(results) {
+                    processImportedData(collection, results.data);
+                }
+            });
+        } else if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
+            // XLSX está disponível globalmente via CDN no index.html
+            const workbook = XLSX.read(data, { type: 'binary' });
+            const firstSheetName = workbook.SheetNames[0];
+            const worksheet = workbook.Sheets[firstSheetName];
+            parsedData = XLSX.utils.sheet_to_json(worksheet);
+            processImportedData(collection, parsedData);
+        } else {
+            showModal('Erro', 'Formato de arquivo não suportado. Use CSV ou XLSX.', 'error');
+        }
+    };
+    
+    if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) reader.readAsBinaryString(file);
+    else reader.readAsText(file);
+}
+
+// Funções para Modais
+function showModal(title, message, type = 'info') {
+    const modal = document.getElementById('global-modal');
+    const titleEl = document.getElementById('modal-title');
+    const messageEl = document.getElementById('modal-message');
+    const actionsEl = document.getElementById('modal-actions');
+
+    // Volta o tamanho do modal para o padrão
+    modal.querySelector('div').classList.remove('max-w-lg');
+    modal.querySelector('div').classList.add('max-w-sm');
+
+    titleEl.textContent = title;
+    messageEl.innerHTML = message.replace(/\n/g, '<br>');
+    
+    let titleClass = 'text-gray-800';
+    if (type === 'success') titleClass = 'text-green-main';
+    if (type === 'error') titleClass = 'text-red-600';
+    if (type === 'warning') titleClass = 'text-yellow-600';
+    if (type === 'info') titleClass = 'text-blue-600'; 
+    titleEl.className = `text-xl font-bold mb-3 ${titleClass}`;
+
+    actionsEl.innerHTML = `
+        <button onclick="hideModal()" class="px-3 py-1.5 text-sm bg-green-main text-white font-semibold rounded-lg hover:bg-green-700 transition-colors shadow-md">
+            OK
+        </button>
+    `;
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+}
+
+function showConfirmModal(title, message, callback) {
+    const modal = document.getElementById('global-modal');
+    const titleEl = document.getElementById('modal-title');
+    const messageEl = document.getElementById('modal-message');
+    const actionsEl = document.getElementById('modal-actions');
+
+    // Volta o tamanho do modal para o padrão
+    modal.querySelector('div').classList.remove('max-w-lg');
+    modal.querySelector('div').classList.add('max-w-sm');
+
+    titleEl.textContent = title;
+    messageEl.innerHTML = message.replace(/\n/g, '<br>');
+    titleEl.className = `text-xl font-bold mb-3 text-red-600`;	
+
+    actionsEl.innerHTML = `
+        <button onclick="hideModal()" class="px-3 py-1.5 text-sm bg-gray-200 text-gray-700 font-semibold rounded-lg hover:bg-gray-300 transition-colors shadow-md">
+            Cancelar
+        </button>
+        <button id="confirm-action-btn" class="px-3 py-1.5 text-sm bg-red-600 text-white font-semibold rounded-lg hover:bg-red-700 transition-colors shadow-md">
+            Confirmar
+        </button>
+    `;
+    
+    document.getElementById('confirm-action-btn').onclick = () => {
+        hideModal();
+        callback();	
+    };
+
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+}
+
+function hideModal() {
+    document.getElementById('global-modal').classList.add('hidden');
+    document.getElementById('global-modal').classList.remove('flex');
+}
+
+// Funções de Perfil
+function showProfileModal() {
+    renderProfileModalContent();
+    document.getElementById('profile-modal').classList.remove('hidden');
+    document.getElementById('profile-modal').classList.add('flex');
+}
+
+function hideProfileModal() {
+    document.getElementById('profile-modal').classList.add('hidden');
+    document.getElementById('profile-modal').classList.remove('flex');
+}
+
+function renderProfileModalContent() {
+    const modalContent = document.getElementById('profile-modal-content');
+    if (!currentUser) {
+        modalContent.innerHTML = '<p class="text-red-500">Erro: Usuário não logado.</p>';
+        return;
+    }
+    
+    // Layout centralizado para dispositivos móveis
+    modalContent.innerHTML = `
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div class="bg-gray-50 p-4 rounded-xl shadow-inner border border-gray-200">
+                <h4 class="text-xl font-semibold text-gray-800 mb-3 flex items-center">
+                    <i class="fas fa-user-edit mr-2 text-green-main"></i> Gerenciar Nome
+                </h4>
+                <p class="text-xs text-gray-600 mb-3">
+                    Altere o nome que aparece na barra superior.
+                </p>
+                <form id="form-personal-name" class="space-y-3">
+                    <div>
+                        <label for="profile-name" class="block text-sm font-medium text-gray-700">Nome de Exibição Atual</label>
+                        <input type="text" id="profile-name" required value="${currentUser.name}"
+                            class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-main focus:ring-green-main p-2 border text-sm">
+                    </div>
+                    <button type="submit" class="w-full flex justify-center py-2 px-3 border border-transparent text-sm font-medium rounded-lg text-white bg-green-main hover:bg-green-700 shadow-md">
+                        <i class="fas fa-save mr-2"></i> Salvar Nome
+                    </button>
+                </form>
+                <div class="mt-4 p-3 bg-white border border-gray-200 rounded-lg text-xs text-gray-700 break-words-all">
+                    <p><span class="font-semibold">Seu Login Principal:</span> ${currentUser.customUsername || currentUser.email}</p>
+                    <p><span class="font-semibold">Seu Perfil:</span> ${currentUser.role.toUpperCase()}</p>
+                </div>
+            </div>
+            
+            <div class="bg-gray-50 p-4 rounded-xl shadow-inner border border-red-200">
+                <h4 class="text-xl font-semibold text-gray-800 mb-3 flex items-center">
+                    <i class="fas fa-key mr-2 text-red-600"></i> Alterar Senha
+                </h4>
+                <p class="text-xs text-red-600 mb-3">
+                    A nova senha deve ter no mínimo 6 caracteres.
+                </p>
+                <form id="form-change-password" class="space-y-3">
+                    <div>
+                        <label for="profile-new-password" class="block text-sm font-medium text-gray-700">Nova Senha</label>
+                        <input type="password" id="profile-new-password" required minlength="6"
+                            class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-red-500 focus:ring-red-500 p-2 border text-sm">
+                    </div>
+                    <div>
+                        <label for="profile-confirm-password" class="block text-sm font-medium text-gray-700">Confirmar Nova Senha</label>
+                        <input type="password" id="profile-confirm-password" required minlength="6"
+                            class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-red-500 focus:ring-red-500 p-2 border text-sm">
+                    </div>
+                    <button type="submit" class="w-full flex justify-center py-2 px-3 border border-transparent text-sm font-medium rounded-lg text-white bg-red-600 hover:bg-red-700 shadow-md">
+                        <i class="fas fa-lock mr-2"></i> Alterar Senha
+                    </button>
+                </form>
+            </div>
+        </div>
+    `;
+    // Anexa eventos ao modal
+    document.getElementById('form-personal-name').onsubmit = savePersonalName;
+    document.getElementById('form-change-password').onsubmit = changePassword;
+}
+
+// Funções de Duplicidades
+function showDuplicityModal() {
+    renderDuplicityModalContent();
+    document.getElementById('duplicity-modal').classList.remove('hidden');
+    document.getElementById('duplicity-modal').classList.add('flex');
+}
+
+function hideDuplicityModal() {
+    document.getElementById('duplicity-modal').classList.add('hidden');
+    document.getElementById('duplicity-modal').classList.remove('flex');
+}
+
+// Wrapper para exclusão que usa o modal de confirmação global
+function deleteDuplicityWrapper(collection, id, value) {
+    const type = collection === 'radios' ? 'Rádio (Série)' : 'Equipamento (Frota)';
+    showConfirmModal('Confirmar Exclusão de Duplicidade', 
+        `Deseja **EXCLUIR PERMANENTEMENTE** o registro duplicado de ${type}: <b>${value}</b>?`, 
+        () => deleteDuplicity(collection, id)
+    );
+}
+
+async function processImportedData(collectionName, data) {
+    if (!db || !appId) {
+        showModal('Erro', 'Conexão com o banco de dados perdida.', 'error');
+        return;
+    }
+
+    const newRecords = [];
+    let currentDb = collectionName === 'radios' ? dbRadios : dbEquipamentos;
+    let ignoredCount = 0;
+
+    for (const item of data) {
+        let record = { createdAt: new Date().toISOString(), ativo: true };
+        let isDuplicate = false;
+        
+        if (collectionName === 'radios') {
+            const serie = item['Numero de Serie'] || item['Numero deSerie'] || item['serie'];
+            const modelo = item['Modelo'] || item['Modelo de Radio'] || item['modelo'];
+            
+            if (!serie || !modelo) continue;
+            
+            record.serie = String(serie).trim();
+            record.modelo = String(modelo).trim();
+            record.status = 'Disponível';	
+
+            // [CORREÇÃO] Checagem de duplicidade no cache local
+            if (currentDb.some(r => r.serie === record.serie)) {
+                console.warn(`Rádio duplicado (cache local): ${record.serie}. Ignorando.`);
+                isDuplicate = true;
+            }
+            
+        } else if (collectionName === 'equipamentos') {
+            const frota = item['Frota'];
+            const grupo = item['Grupo'];
+            const modeloEq = item['Modelo do Equipamento'] || item['Modelo Equipamento'];
+            const subgrupo = item['Subgrupo'] || item['Descricao do Equipamento'] || item['Descricao Equipamento'];
+            const gestor = item['Gestor'] || 'Sem Gestor';
+            
+            if (!frota || !grupo || !modeloEq || !subgrupo || !GROUPS.includes(String(grupo).trim())) {
+                console.warn('Registro de equipamento inválido:', item);
+                continue;
+            }
+
+            record.frota = String(frota).trim();
+            record.grupo = String(grupo).trim();
+            record.modelo = String(modeloEq).trim();
+            record.subgrupo = String(subgrupo).trim();	
+            record.gestor = String(gestor).trim();
+            
+            // [CORREÇÃO] Checagem de duplicidade no cache local
+            if (currentDb.some(r => r.frota === record.frota)) {
+                console.warn(`Equipamento duplicado (cache local): ${record.frota}. Ignorando.`);
+                isDuplicate = true;
+            }
+        }
+
+        if (isDuplicate) {
+            ignoredCount++;
+        } else {
+            newRecords.push(record);
+        }
+    }
+
+    if (newRecords.length > 0) {
+        // [CORREÇÃO] Usa appId hardcoded
+        const colPath = `artifacts/${appId}/public/data/${collectionName}`;
+        const colRef = collection(db, colPath);
+        const batch = writeBatch(db);
+        
+        newRecords.forEach(record => {
+            const newDocRef = doc(colRef);	
+            batch.set(newDocRef, record);
+        });
+
+        try {
+            await batch.commit();
+            let msg = `${newRecords.length} registros de ${collectionName} importados com sucesso.`;
+            if (ignoredCount > 0) {
+                msg += `<br>(${ignoredCount} duplicatas ignoradas.)`;
+            }
+            showModal('Importação Concluída', msg, 'success');
+        } catch (error) {
+            showModal('Erro de Importação', 'Ocorreu um erro ao salvar os dados no banco de dados.', 'error');
+        }
+    } else {
+        let msg = 'Nenhum registro novo válido foi encontrado no arquivo.';
+        if (ignoredCount > 0) {
+            msg += `<br>(${ignoredCount} duplicatas ignoradas.)`;
+        }
+        showModal('Importação', msg, 'info');
+    }
+}
+
+
+// -------------------------------------------------------------------------------------
+
 // --- Inicialização ---
 
 window.onhashchange = handleHashChange;
 
-window.handleLogout = handleLogout;
+// EXPOSIÇÕES GLOBAIS DE FUNÇÕES ESSENCIAIS (CORREÇÃO DE ESCOPO)
+window.showModal = showModal;
+window.showConfirmModal = showConfirmModal;
+window.hideModal = hideModal;
+window.handleImport = handleImport; 
+window.handleLogout = handleLogout; // Expondo handleLogout
 window.handleSearchInput = handleSearchInput;
 window.loadRadioForEdit = loadRadioForEdit;
 window.loadEquipamentoForEdit = loadEquipamentoForEdit;
-window.showConfirmModal = showConfirmModal;
-window.hideModal = hideModal;
-window.handleImport = handleImport;
 window.showPermissionModal = showPermissionModal;
 window.renderApp = renderApp;	
 window.updateState = updateState;	
 window.deleteRecord = deleteRecord;	
-window.toggleRecordAtivo = toggleRecordAtivo; 
-
-// Funções CRUD de Usuários
+window.toggleRecordAtivo = toggleRecordAtivo; 
 window.loadUserForEdit = loadUserForEdit;
 window.deleteUser = deleteUser;
-
-// Funções de Paginação
 window.setRadioPage = setRadioPage;
 window.setEquipamentoPage = setEquipamentoPage;
 window.setGeralPage = setGeralPage;
-
-// NOVO: Solicitar Acesso
-window.handleSolicitarAcesso = handleSolicitarAcesso; // Exportado para uso no formulário de solicitação
-
-// NOVO: Perfil Modal
+window.handleSolicitarAcesso = handleSolicitarAcesso; 
 window.showProfileModal = showProfileModal;
 window.hideProfileModal = hideProfileModal;
+window.getUserAvatar = getUserAvatar; // Expondo getUserAvatar
 
-// NOVO: Informações de Importação
-window.RADIO_IMPORT_INFO = RADIO_IMPORT_INFO;
-window.EQUIPAMENTO_IMPORT_INFO = EQUIPAMENTO_IMPORT_INFO;
-
+// EXPOSIÇÕES DO SISTEMA DE INTEGRIDADE
+window.showDuplicityModal = showDuplicityModal;
+window.hideDuplicityModal = hideDuplicityModal;
+window.deleteDuplicity = deleteDuplicity;
+window.deleteDuplicityWrapper = deleteDuplicityWrapper;
 
 window.onload = initApp;

@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<html lang="pt-BR">
-
-<head>
+<html lang="pt-BR" class="light"> <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>📻 Gestão de Rádios</title>
+
+    <link rel="icon" type="image/x-icon" href="/favicon.ico">
 
     <script src="https://cdn.tailwindcss.com"></script>
 
@@ -20,7 +20,9 @@
     <link rel="stylesheet" href="style.css">
 
     <script>
+        // Configuração do Tailwind CSS
         tailwind.config = {
+            darkMode: 'class', // Habilita o dark mode baseado na classe 'dark' no <html>
             theme: {
                 extend: {
                     fontFamily: {
@@ -28,36 +30,45 @@
                     },
                     colors: {
                         'green-main': '#40800c', /* Novo verde principal: 40800c */
+                        'dark-bg': '#1f2937', /* Fundo escuro */
+                        'dark-card': '#374151', /* Card escuro */
                     }
                 }
             }
         }
+
+        // Script de inicialização do tema (executa antes do app.js)
+        if (localStorage.getItem('theme') === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+            document.documentElement.classList.add('dark');
+        } else {
+            document.documentElement.classList.remove('dark');
+        }
     </script>
     
 </head>
-<body>
+<body class="bg-gray-50 dark:bg-gray-900 transition-colors duration-500">
 
-    <div id="app" class="min-h-screen bg-gray-50">
-        </div>
+    <div id="app" class="min-h-screen">
+    </div>
 
     <div id="global-modal" class="fixed inset-0 z-50 hidden items-center justify-center p-4 modal-overlay">
-        <div class="bg-white rounded-xl shadow-2xl w-full max-w-sm transform transition-all scale-100 opacity-100 p-6">
-            <h3 id="modal-title" class="text-xl font-bold text-gray-800 mb-3">Aviso</h3>
-            <p id="modal-message" class="text-gray-600 mb-6"></p>
+        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-sm transform transition-all scale-100 opacity-100 p-6">
+            <h3 id="modal-title" class="text-xl font-bold text-gray-800 dark:text-gray-100 mb-3">Aviso</h3>
+            <p id="modal-message" class="text-gray-600 dark:text-gray-300 mb-6"></p>
             <div id="modal-actions" class="flex justify-end space-x-3">
-                </div>
+            </div>
         </div>
     </div>
     
     <div id="profile-modal" class="fixed inset-0 z-50 hidden items-center justify-center p-4 modal-overlay">
-        <div class="bg-white rounded-xl shadow-2xl w-full max-w-lg transform transition-all scale-100 opacity-100 p-6">
-            <h3 class="text-2xl font-bold text-gray-800 mb-6 border-b pb-2 flex items-center">
+        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-lg transform transition-all scale-100 opacity-100 p-6">
+            <h3 class="text-2xl font-bold text-gray-800 dark:text-gray-100 mb-6 border-b dark:border-gray-700 pb-2 flex items-center">
                 <i class="fas fa-user-circle mr-2 text-green-main"></i> Meu Perfil
             </h3>
             <div id="profile-modal-content" class="space-y-8">
-                </div>
+            </div>
             <div class="flex justify-end mt-6">
-                <button onclick="hideProfileModal()" class="px-4 py-2 text-sm bg-gray-200 text-gray-700 font-semibold rounded-lg hover:bg-gray-300 transition-colors shadow-md">
+                <button onclick="hideProfileModal()" class="px-4 py-2 text-sm bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 font-semibold rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors shadow-md">
                     Fechar
                 </button>
             </div>
@@ -65,18 +76,18 @@
     </div>
     
     <div id="duplicity-modal" class="fixed inset-0 z-50 hidden items-center justify-center p-4 modal-overlay">
-        <div class="bg-white rounded-xl shadow-2xl w-full max-w-2xl transform transition-all scale-100 opacity-100 p-6">
-            <h3 class="text-2xl font-bold text-red-600 mb-6 border-b pb-2 flex items-center">
+        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-2xl transform transition-all scale-100 opacity-100 p-6">
+            <h3 class="text-2xl font-bold text-red-600 mb-6 border-b dark:border-gray-700 pb-2 flex items-center">
                 <i class="fas fa-heart-crack mr-2"></i> Integridade de Dados Crítica
             </h3>
-            <p class="text-red-700 font-semibold mb-4">
-                Foram encontradas duplicidades críticas de Número de Série (Rádio) e/ou Frota (Equipamento). 
+            <p class="text-red-700 dark:text-red-400 font-semibold mb-4">
+                Foram encontradas duplicidades críticas de **Número de Série (Rádio)** e/ou **Frota (Equipamento)**. 
                 Para garantir a integridade do sistema, você deve **remover o registro duplicado mais recente ou menos importante**.
             </p>
             <div id="duplicity-modal-content" class="space-y-6 max-h-96 overflow-y-auto">
-                </div>
+            </div>
             <div class="flex justify-end mt-6">
-                <button onclick="hideDuplicityModal()" class="px-4 py-2 text-sm bg-gray-200 text-gray-700 font-semibold rounded-lg hover:bg-gray-300 transition-colors shadow-md">
+                <button onclick="hideDuplicityModal()" class="px-4 py-2 text-sm bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 font-semibold rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors shadow-md">
                     Fechar Aviso
                 </button>
             </div>

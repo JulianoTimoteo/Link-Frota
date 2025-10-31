@@ -7,7 +7,9 @@ import {
     signOut,
     updatePassword,
     // NOVO IMPORT: Necessário para criar usuários se o Admin cadastrar com senha/username
-    createUserWithEmailAndPassword 
+    createUserWithEmailAndPassword,
+    reauthenticateWithCredential,
+    EmailAuthProvider
 } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
 import { 
     getFirestore, 
@@ -51,7 +53,7 @@ let currentUser = null;
 let currentPage = 'login';
 let currentLoginView = 'login'; // 'login' ou 'solicitar'
 let currentCadastroTab = 'radio';
-let currentSettingTab = 'system'; 
+let currentSettingTab = 'system'; 
 let isLoggingIn = false;
 // NOVO: Armazena usuários aguardando aprovação
 let pendingUsers = [];
@@ -69,7 +71,7 @@ let searchCursorPosition = 0;
 const GROUPS = ['Colheita', 'Transporte', 'Oficina', 'TPL', 'Industria'];
 const DEFAULT_LETTER_MAP = {
     Colheita: 'A',
-    Transporte: 'B', 
+    Transporte: 'B', 
     Oficina: 'NUM',
     TPL: 'D',
     Industria: 'C'
@@ -171,7 +173,7 @@ function checkDuplicities() {
     // Filtra duplicidades únicas e ordena por data de criação para melhor visualização
     duplicities = newDuplicities.filter((item, index, self) =>
         index === self.findIndex((t) => (t.id === item.id))
-    ).sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt)); 
+    ).sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt)); 
 }
 
 
@@ -208,15 +210,15 @@ async function loadInitialSettings() {
             const data = settingsSnap.data();
             settings.letterMap = data.letterMap || DEFAULT_LETTER_MAP;
             settings.nextIndex = data.nextIndex || DEFAULT_NEXT_INDEX;
-            settings.users = data.users || []; 
+            settings.users = data.users || []; 
         } else {
             console.warn("Documento de 'settings/config' não encontrado. Usando padrões locais.");
             // Define um usuário admin padrão se não houver configurações
             if (settings.users.length === 0) {
-                settings.users = [{ 
-                    id: crypto.randomUUID(), 
-                    name: "Juliano Timoteo (Admin Padrão)", 
-                    username: ADMIN_PRINCIPAL_EMAIL, 
+                settings.users = [{ 
+                    id: crypto.randomUUID(), 
+                    name: "Juliano Timoteo (Admin Padrão)", 
+                    username: ADMIN_PRINCIPAL_EMAIL, 
                     role: "admin",
                     permissions: { dashboard: true, cadastro: true, pesquisa: true, settings: true }
                 }];
@@ -245,7 +247,7 @@ async function attachFirestoreListeners() {
     Object.keys(collectionsToSync).forEach(colName => {
         const colPath = `artifacts/${appId}/public/data/${colName}`;
         const q = query(collection(db, colPath));
-        
+         
         const unsub = onSnapshot(q, (querySnapshot) => {
             const data = [];
             querySnapshot.forEach((doc) => {
@@ -529,7 +531,7 @@ async function deleteDuplicity(collectionName, id) {
     }
 
     // Bloqueia a exclusão se o item estiver vinculado a um registro ativo
-    const isLinked = collectionName === 'radios' 
+    const isLinked = collectionName === 'radios' 
         ? dbRegistros.some(reg => reg.radioId === id)
         : dbRegistros.some(reg => reg.equipamentoId === id);
 
@@ -548,7 +550,7 @@ async function deleteDuplicity(collectionName, id) {
         showModal('Sucesso', 'Duplicidade removida com sucesso! A integridade dos dados será verificada novamente.', 'success');
         
         // Força nova verificação e renderização
-        checkDuplicities(); 
+        checkDuplicities(); 
         renderApp();
         hideDuplicityModal();
         
@@ -572,7 +574,7 @@ function loadUserForEdit(id) {
         
         // Oculta o campo de senha para edição, a menos que o admin queira alterá-la.
         document.getElementById('user-password-field').classList.add('hidden');
-        document.getElementById('user-password').value = ''; 
+        document.getElementById('user-password').value = ''; 
 
         document.getElementById('user-form-title').textContent = 'Editar Perfil de Usuário';
         showModal('Edição', `Carregando perfil de ${user.name} para edição.`, 'info');
@@ -618,7 +620,7 @@ async function saveUser(e) {
     const isEditing = !!id;
     
     // 2. Checagem de duplicidade (Username/Email E Nome de Usuário)
-    const isDuplicateEmail = usersFromDB.some(u => 
+    const isDuplicateEmail = usersFromDB.some(u => 
         u.username === email && (!isEditing || u.id !== id)
     );
 
@@ -628,13 +630,13 @@ async function saveUser(e) {
     }
 
     if (customUsername) {
-         const isDuplicateCustomUsername = usersFromDB.some(u => 
-            u.customUsername && u.customUsername.toLowerCase() === customUsername.toLowerCase() && (!isEditing || u.id !== id)
-        );
-        if (isDuplicateCustomUsername) {
-            showModal('Erro', `Este Nome de Usuário (${customUsername}) já está em uso.`, 'error');
-            return;
-        }
+         const isDuplicateCustomUsername = usersFromDB.some(u => 
+             u.customUsername && u.customUsername.toLowerCase() === customUsername.toLowerCase() && (!isEditing || u.id !== id)
+         );
+         if (isDuplicateCustomUsername) {
+             showModal('Erro', `Este Nome de Usuário (${customUsername}) já está em uso.`, 'error');
+             return;
+         }
     }
 
     let userToSave;
@@ -670,12 +672,12 @@ async function saveUser(e) {
             return;
         }
 
-        userToSave = { 
+        userToSave = { 
             id: crypto.randomUUID(), // Novo ID único
-            name, 
+            name, 
             username: email, // O email (real ou fake) que será usado no Firebase Auth
             customUsername, // O nome de usuário de login (se existir)
-            role, 
+            role, 
             permissions: {} // Permissões padrão vazias
         };
         usersFromDB.push(userToSave);
@@ -692,21 +694,27 @@ async function saveUser(e) {
     try {
         // 3. (NOVO) Criar/Atualizar Usuário no Firebase Auth
         if (shouldCreateAuth) {
-            await createUserWithEmailAndPassword(auth, email, password);
+            // Se for customUsername, tentamos criar no Auth com o email fake
+            if (userToSave.customUsername) {
+                await createUserWithEmailAndPassword(auth, email, password);
+            } else {
+                // Se for email real, o Admin já deve ter criado no Auth ou o usuário se registrou por solicitação
+                // Se a criação falhar aqui, o Admin deve resolver o Auth
+            }
         }
         
-        // Se for edição e a senha foi alterada, usamos o Auth SDK
+        // Se for edição e a senha foi alterada
         if (shouldUpdateAuthPassword) {
-            // Armazenamos a senha para customUsername.
+            // Se for customUsername, armazenamos a senha para check local (método não-padrão)
             if (userToSave.customUsername) {
-                userToSave.loginPassword = password; 
+                userToSave.loginPassword = password; 
             } else {
-                 // Se for login por email normal, a senha não deve ser armazenada no Firestore.
-                 showModal('Aviso de Senha', 'Para usuários com email real, a senha só pode ser alterada via console do Firebase ou reset de senha do usuário. O campo foi ignorado.', 'warning');
+                // Para login por email normal, a senha deve ser alterada pelo próprio usuário via modal de perfil.
+                showModal('Aviso de Senha', 'Para usuários com email real, a senha só pode ser alterada via reautenticação do próprio usuário. O campo de senha para este perfil foi ignorado.', 'warning');
             }
         } else if (shouldCreateAuth && userToSave.customUsername) {
             // Para novos usuários com customUsername, armazena a senha inicial para o check no login.
-            userToSave.loginPassword = password; 
+            userToSave.loginPassword = password; 
         }
 
         // 4. Salva a lista completa no Firestore (incluindo customUsername e loginPassword)
@@ -765,7 +773,7 @@ async function deleteUser(id) {
         await setDoc(settingsDocRef, { users: usersFromDB }, { merge: true });
         showModal('Sucesso', `Perfil de ${userName} excluído com sucesso!`, 'success');
         // NOTA: A exclusão do usuário do Firebase Auth deve ser feita manualmente pelo Admin via Console, por segurança.
-        renderApp(); 
+        renderApp(); 
     } catch (e) {
         console.error("Erro ao excluir perfil de usuário:", e);
         showModal('Erro', 'Não foi possível excluir o perfil no banco de dados.', 'error');
@@ -774,7 +782,7 @@ async function deleteUser(id) {
 
 // --- Funções de Gerenciamento de Pendências (Novo) ---
 
-async function approveUser(pendingId, name, email) {
+async function approveUser(pendingId, name, email, tempPassword) {
     if (!db || !appId || currentUser.role !== 'admin') {
         showModal('Acesso Negado', 'Você não tem permissão para aprovar usuários.', 'error');
         return;
@@ -782,17 +790,30 @@ async function approveUser(pendingId, name, email) {
 
     const usersFromDB = settings.users;
     
-    // 1. Adicionar usuário na lista de usuários do sistema (settings.users)
-    const newUser = { 
+    // 1. Criar usuário no Firebase Auth
+    try {
+        await createUserWithEmailAndPassword(auth, email, tempPassword);
+    } catch (e) {
+        if (e.code === 'auth/email-already-in-use') {
+             // Se o email já estiver em uso, apenas o adicionamos ao Firestore
+             showModal('Aviso de Auth', `O email ${email} já existe no Firebase Auth. Apenas o perfil no sistema será criado.`, 'warning');
+        } else {
+             showModal('Erro de Auth', `Erro ao criar usuário no Firebase Auth: ${e.message}`, 'error');
+             return;
+        }
+    }
+
+    // 2. Adicionar usuário na lista de usuários do sistema (settings.users)
+    const newUser = { 
         id: crypto.randomUUID(), // Novo ID único
-        name, 
-        username: email, 
+        name, 
+        username: email, 
         role: 'user', // Começa como usuário padrão
         permissions: { dashboard: true, cadastro: true, pesquisa: true, settings: false } // Permissões padrão
     };
     usersFromDB.push(newUser);
 
-    // 2. Remover da lista de pendências (pending_approvals)
+    // 3. Remover da lista de pendências (pending_approvals)
     // [CORREÇÃO] Usa appId hardcoded
     const pendingDocRef = doc(db, `artifacts/${appId}/public/data/pending_approvals`, pendingId);
 
@@ -800,19 +821,19 @@ async function approveUser(pendingId, name, email) {
         // Usa batch para garantir atomicidade das operações
         const batch = writeBatch(db);
         
-        // 2a. Remover pendência
+        // 3a. Remover pendência
         batch.delete(pendingDocRef);
 
-        // 2b. Salvar nova lista de usuários
+        // 3b. Salvar nova lista de usuários
         const settingsDocRef = doc(db, "artifacts", appId, "public", "data", "settings", "config");
         batch.update(settingsDocRef, { users: usersFromDB });
         
         await batch.commit();
 
-        // 3. Notificar sucesso e fechar modal
+        // 4. Notificar sucesso e fechar modal
         hideModal();
         showModal('Usuário Aprovado', `O usuário <b>${name}</b> (${email}) foi aprovado como 'Usuário Padrão'. Ele pode logar agora.`, 'success');
-        renderApp(); 
+        renderApp(); 
         
     } catch (e) {
         showModal('Erro', 'Não foi possível aprovar o usuário.', 'error');
@@ -835,7 +856,7 @@ async function rejectUser(pendingId, name) {
         // 2. Notificar sucesso e fechar modal
         hideModal();
         showModal('Usuário Negado', `O acesso de <b>${name}</b> foi negado e removido da lista de pendências.`, 'warning');
-        renderApp(); 
+        renderApp(); 
         
     } catch (e) {
         showModal('Erro', 'Não foi possível negar o acesso.', 'error');
@@ -858,6 +879,10 @@ async function handleSolicitarAcesso(e) {
     }
     if (!isEmail(email)) {
         showModal('Erro', 'Email inválido.', 'error');
+        return;
+    }
+    if (senhaProvisoria.length < 6) {
+        showModal('Erro', 'A Senha Provisória deve ter no mínimo 6 caracteres.', 'error');
         return;
     }
 
@@ -889,8 +914,8 @@ async function handleSolicitarAcesso(e) {
             createdAt: new Date().toISOString()
         });
 
-        showModal('Solicitação Enviada', 
-            `Sua solicitação de acesso foi enviada com sucesso para aprovação. Você será notificado após a análise.`, 
+        showModal('Solicitação Enviada', 
+            `Sua solicitação de acesso foi enviada com sucesso para aprovação. Você será notificado após a análise.`, 
             'success');
         
         // Volta para a tela de login principal
@@ -909,17 +934,18 @@ function renderPendingApprovalsModal() {
         return;
     }
 
-    const pendingListHTML = pendingUsers.length > 0 ? 
+    const pendingListHTML = pendingUsers.length > 0 ? 
         pendingUsers.map(u => `
-            <div class="flex items-center justify-between p-3 border-b border-gray-100 last:border-b-0 bg-white rounded-lg shadow-sm">
+            <div class="flex items-center justify-between p-3 border-b border-gray-100 last:border-b-0 bg-white dark:bg-gray-700 rounded-lg shadow-sm">
                 <div>
-                    <p class="font-semibold text-gray-800">${u.name}</p>
-                    <p class="text-xs text-gray-500">${u.email}</p>
-                    <p class="text-xs text-gray-500">Telefone: ${u.phone || 'N/A'}</p>
-                    <p class="text-xs text-gray-500">Solicitado em: ${new Date(u.createdAt).toLocaleDateString()} ${new Date(u.createdAt).toLocaleTimeString()}</p>
+                    <p class="font-semibold text-gray-800 dark:text-gray-100">${u.name}</p>
+                    <p class="text-xs text-gray-500 dark:text-gray-300">${u.email}</p>
+                    <p class="text-xs text-gray-500 dark:text-gray-300">Telefone: ${u.phone || 'N/A'}</p>
+                    <p class="text-xs text-gray-500 dark:text-gray-300">Senha Provisória: ${u.tempPassword || 'N/A'}</p>
+                    <p class="text-xs text-gray-500 dark:text-gray-300">Solicitado em: ${new Date(u.createdAt).toLocaleDateString()} ${new Date(u.createdAt).toLocaleTimeString()}</p>
                 </div>
                 <div class="flex space-x-2">
-                    <button onclick="approveUserWrapper('${u.id}', '${u.name}', '${u.email}')" class="px-3 py-1 text-xs bg-green-main text-white rounded-lg hover:bg-green-700 shadow-md transition-colors">
+                    <button onclick="approveUserWrapper('${u.id}', '${u.name}', '${u.email}', '${u.tempPassword}')" class="px-3 py-1 text-xs bg-green-main text-white rounded-lg hover:bg-green-700 shadow-md transition-colors">
                         Aprovar
                     </button>
                     <button onclick="rejectUserWrapper('${u.id}', '${u.name}')" class="px-3 py-1 text-xs bg-red-500 text-white rounded-lg hover:bg-red-600 shadow-md transition-colors">
@@ -928,7 +954,7 @@ function renderPendingApprovalsModal() {
                 </div>
             </div>
         `).join('')
-        : '<p class="text-gray-500 text-center py-4">Nenhuma solicitação de acesso pendente.</p>';
+        : '<p class="text-gray-500 dark:text-gray-400 text-center py-4">Nenhuma solicitação de acesso pendente.</p>';
 
     const modal = document.getElementById('global-modal');
     const titleEl = document.getElementById('modal-title');
@@ -938,19 +964,19 @@ function renderPendingApprovalsModal() {
     titleEl.textContent = `Aprovações Pendentes (${pendingUsers.length})`;
     // Remove a classe 'max-w-sm' do modal principal para permitir mais espaço
     modal.querySelector('div').classList.remove('max-w-sm');
-    modal.querySelector('div').classList.add('max-w-lg'); 
+    modal.querySelector('div').classList.add('max-w-lg'); 
     
     messageEl.innerHTML = `
-        <p class="text-sm text-gray-600 mb-4">Novos usuários aguardam sua aprovação.</p>
-        <div class="max-h-80 overflow-y-auto space-y-3 p-2 bg-gray-50 rounded-lg border border-gray-200">
+        <p class="text-sm text-gray-600 dark:text-gray-300 mb-4">Novos usuários aguardam sua aprovação.</p>
+        <div class="max-h-80 overflow-y-auto space-y-3 p-2 bg-gray-50 dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700">
             ${pendingListHTML}
         </div>
     `;
-    titleEl.className = `text-xl font-bold mb-3 ${pendingUsers.length > 0 ? 'text-yellow-600' : 'text-gray-800'}`;
+    titleEl.className = `text-xl font-bold mb-3 ${pendingUsers.length > 0 ? 'text-yellow-600' : 'text-gray-800 dark:text-gray-100'}`;
 
     actionsEl.innerHTML = `
-        <button onclick="hideModal(); document.getElementById('global-modal').querySelector('div').classList.remove('max-w-lg'); document.getElementById('global-modal').querySelector('div').classList.add('max-w-sm');" 
-                class="px-3 py-1.5 text-sm bg-gray-200 text-gray-700 font-semibold rounded-lg hover:bg-gray-300 transition-colors shadow-md">
+        <button onclick="hideModal(); document.getElementById('global-modal').querySelector('div').classList.remove('max-w-lg'); document.getElementById('global-modal').querySelector('div').classList.add('max-w-sm');" 
+                class="px-3 py-1.5 text-sm bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 font-semibold rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors shadow-md">
             Fechar
         </button>
     `;
@@ -959,8 +985,8 @@ function renderPendingApprovalsModal() {
 }
 
 // Wrappers para lidar com aspas em strings
-window.approveUserWrapper = (id, name, email) => {
-    showConfirmModal('Confirmar Aprovação', `Deseja aprovar o acesso de <b>${name}</b>? Ele receberá permissões de 'Usuário Padrão'.`, () => approveUser(id, name, email));
+window.approveUserWrapper = (id, name, email, tempPassword) => {
+    showConfirmModal('Confirmar Aprovação', `Deseja aprovar o acesso de <b>${name}</b>? Ele receberá permissões de 'Usuário Padrão' e será criado no Auth com a senha provisória.`, () => approveUser(id, name, email, tempPassword));
 };
 window.rejectUserWrapper = (id, name) => {
     showConfirmModal('Confirmar Negação', `Deseja negar o acesso de <b>${name}</b>? A solicitação será removida.`, () => rejectUser(id, name));
@@ -993,21 +1019,21 @@ function renderDuplicityModalContent() {
         const typeLabel = group.collection === 'radios' ? 'Rádio (Série)' : 'Equipamento (Frota)';
         const itemsList = group.items.map(item => {
             const date = new Date(item.createdAt).toLocaleString();
-            const isLinked = dbRegistros.some(reg => 
-                (item.collection === 'radios' && reg.radioId === item.id) || 
+            const isLinked = dbRegistros.some(reg => 
+                (item.collection === 'radios' && reg.radioId === item.id) || 
                 (item.collection === 'equipamentos' && reg.equipamentoId === item.id)
             );
-            const actionButton = isLinked 
+            const actionButton = isLinked 
                 ? `<span class="text-xs font-semibold text-red-500 bg-red-100 px-2 py-1 rounded-full">EM USO</span>`
                 : `<button onclick="deleteDuplicityWrapper('${item.collection}', '${item.id}', '${item.value}')" class="px-3 py-1 text-xs bg-red-500 text-white rounded-lg hover:bg-red-600 shadow-md transition-colors">
                     Remover Este
                    </button>`;
 
             return `
-                <div class="flex justify-between items-center p-3 border-b border-gray-100 bg-white hover:bg-red-50/50 transition-colors rounded-lg shadow-sm">
+                <div class="flex justify-between items-center p-3 border-b border-gray-100 dark:border-gray-700 bg-white dark:bg-gray-700 hover:bg-red-50/50 dark:hover:bg-red-900/20 transition-colors rounded-lg shadow-sm">
                     <div class="space-y-0.5">
-                        <p class="font-semibold text-gray-800 break-words-all">ID: <span class="font-mono text-xs">${item.id}</span></p>
-                        <p class="text-xs text-gray-600">Criado em: ${date}</p>
+                        <p class="font-semibold text-gray-800 dark:text-gray-100 break-words-all">ID: <span class="font-mono text-xs">${item.id}</span></p>
+                        <p class="text-xs text-gray-600 dark:text-gray-300">Criado em: ${date}</p>
                     </div>
                     ${actionButton}
                 </div>
@@ -1015,17 +1041,46 @@ function renderDuplicityModalContent() {
         }).join('');
 
         html += `
-            <div class="bg-red-50 p-4 rounded-xl shadow-inner border border-red-200">
-                <h4 class="text-lg font-bold text-red-700 mb-3">${typeLabel}: ${group.value} (${group.items.length} duplicatas)</h4>
+            <div class="bg-red-50 dark:bg-red-900/10 p-4 rounded-xl shadow-inner border border-red-200 dark:border-red-700">
+                <h4 class="text-lg font-bold text-red-700 dark:text-red-400 mb-3">${typeLabel}: ${group.value} (${group.items.length} duplicatas)</h4>
                 <div class="space-y-2">
                     ${itemsList}
                 </div>
-                <p class="mt-3 text-xs text-red-700 font-semibold">Regra: Mantenha um único registro. Registros "EM USO" não podem ser removidos.</p>
+                <p class="mt-3 text-xs text-red-700 dark:text-red-400 font-semibold">Regra: Mantenha um único registro. Registros "EM USO" não podem ser removidos.</p>
             </div>
         `;
     });
 
     modalContent.innerHTML = html;
+}
+// ----------------------------------------------------
+
+// 🌟 NOVO: Lógica de Tema
+function toggleTheme() {
+    const isDark = document.documentElement.classList.toggle('dark');
+    if (isDark) {
+        localStorage.setItem('theme', 'dark');
+    } else {
+        localStorage.setItem('theme', 'light');
+    }
+    // Força a re-renderização apenas da TopBar para atualizar o botão
+    if (currentUser) {
+        renderApp();
+    }
+}
+
+function renderThemeButton() {
+    const isDark = document.documentElement.classList.contains('dark');
+    const icon = isDark ? 'fas fa-sun' : 'fas fa-moon';
+    const title = isDark ? 'Mudar para Tema Claro' : 'Mudar para Tema Escuro';
+
+    return `
+        <button onclick="toggleTheme()" 
+            class="text-gray-500 dark:text-gray-300 hover:text-yellow-500 dark:hover:text-yellow-300 transition-colors p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700" 
+            title="${title}">
+            <i class="${icon}"></i>
+        </button>
+    `;
 }
 // ----------------------------------------------------
 
@@ -1056,7 +1111,7 @@ function renderTopBar() {
     const tabLinks = tabs.map(tab => {
         const isActive = currentPage === tab.id;
         // 'checked' simula o estado ativo do radio button
-        const isChecked = isActive ? 'checked' : ''; 
+        const isChecked = isActive ? 'checked' : ''; 
         
         let iconClass = tab.icon;
 
@@ -1065,7 +1120,7 @@ function renderTopBar() {
                 <input type="radio" class="radio-input" name="main_nav_choice" ${isChecked} />
                 <span class="radio-custom"></span>
                 <span class="radio-text flex items-center space-x-1">
-                    <i class="fas ${iconClass} text-base"></i> 
+                    <i class="fas ${iconClass} text-base"></i> 
                     <span>${tab.name}</span>
                 </span>
             </label>
@@ -1075,39 +1130,39 @@ function renderTopBar() {
     // 🌟 NOVO: Lógica do Sino de Integridade
     const duplicityCount = duplicities.length;
     const duplicityBell = duplicityCount > 0 ? `
-        <button onclick="showDuplicityModal()" class="relative text-gray-500 hover:text-red-600 transition-colors p-2 rounded-full hover:bg-red-100" title="Alerta Crítico de Duplicidade de Dados">
+        <button onclick="showDuplicityModal()" class="relative text-gray-500 dark:text-red-400 hover:text-red-600 transition-colors p-2 rounded-full hover:bg-red-100 dark:hover:bg-gray-700" title="Alerta Crítico de Duplicidade de Dados">
             <i class="fas fa-bell duplicity-bell-active"></i>
             <span class="absolute top-0 right-0 inline-flex items-center justify-center px-2 py-1 text-xs font-bold leading-none text-red-100 transform translate-x-1/2 -translate-y-1/2 bg-red-600 rounded-full">${duplicityCount}</span>
         </button>
     ` : `
-        <button onclick="showDuplicityModal()" class="relative text-gray-500 hover:text-green-main transition-colors p-2 rounded-full hover:bg-gray-100" title="Integridade de Dados (OK)">
+        <button onclick="showDuplicityModal()" class="relative text-gray-500 dark:text-gray-300 hover:text-green-main transition-colors p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700" title="Integridade de Dados (OK)">
             <i class="fas fa-heart-pulse"></i>
         </button>
     `;
 
 
     return `
-        <header class="bg-white shadow-lg sticky top-0 z-10 border-b border-gray-100">
+        <header class="bg-white dark:bg-gray-800 shadow-lg sticky top-0 z-10 border-b border-gray-100 dark:border-gray-700">
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div class="flex justify-between h-16 items-center">
                     
                     <div class="flex-1 flex justify-start items-center">
-                        <h1 class="text-xl font-bold text-gray-800 hidden sm:block">📻 Gestão de Rádios</h1>
-                        <h1 class="text-xl font-bold text-gray-800 block sm:hidden">📻 GR</h1>
+                        <h1 class="text-xl font-bold text-gray-800 dark:text-gray-100 hidden sm:block">📻 Gestão de Rádios</h1>
+                        <h1 class="text-xl font-bold text-gray-800 dark:text-gray-100 block sm:hidden">📻 GR</h1>
                     </div>
 
                     <nav class="hidden md:block mx-auto flex-none">
-                        <div class="radio-group-container border-b border-gray-200">
+                        <div class="radio-group-container border-b border-gray-200 dark:border-gray-700">
                             ${tabLinks}
                         </div>
                     </nav>
                     
                     <div class="flex-1 flex justify-end items-center space-x-4">
                         
-                        ${duplicityBell}
+                        ${renderThemeButton()} ${duplicityBell}
                         
                         ${currentUser.role === 'admin' ? `
-                        <button onclick="renderPendingApprovalsModal()" class="relative text-gray-500 hover:text-yellow-600 transition-colors p-2 rounded-full hover:bg-gray-100" title="Novas Solicitações de Acesso">
+                        <button onclick="renderPendingApprovalsModal()" class="relative text-gray-500 dark:text-gray-300 hover:text-yellow-600 transition-colors p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700" title="Novas Solicitações de Acesso">
                             <i class="fas fa-bell"></i>
                             ${pendingUsers.length > 0 ? `
                             <span class="absolute top-0 right-0 inline-flex items-center justify-center px-2 py-1 text-xs font-bold leading-none text-red-100 transform translate-x-1/2 -translate-y-1/2 bg-red-600 rounded-full">${pendingUsers.length}</span>
@@ -1115,26 +1170,26 @@ function renderTopBar() {
                         </button>
                         ` : ''}
 
-                        <span class="text-sm font-medium text-gray-600 hidden sm:inline">
+                        <span class="text-sm font-medium text-gray-600 dark:text-gray-300 hidden sm:inline">
                             Olá, ${currentUser.name}
                         </span>
-                        <button onclick="showProfileModal()" class="text-gray-500 hover:text-green-main transition-colors p-1 rounded-full hover:bg-gray-100" title="Meu Perfil / Gerenciar Senha">
+                        <button onclick="showProfileModal()" class="text-gray-500 dark:text-gray-300 hover:text-green-main transition-colors p-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700" title="Meu Perfil / Gerenciar Senha">
                             ${getUserAvatar(currentUser)}
                         </button>
-                        <button onclick="handleLogout()" class="text-gray-500 hover:text-red-500 transition-colors p-1 rounded-full hover:bg-gray-100" title="Sair do Sistema">
+                        <button onclick="handleLogout()" class="text-gray-500 dark:text-gray-300 hover:text-red-500 transition-colors p-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700" title="Sair do Sistema">
                             <i class="fas fa-sign-out-alt"></i>
                         </button>
                     </div>
                 </div>
             </div>
         </header>
-        <nav class="bg-white border-t border-gray-200 fixed bottom-0 left-0 right-0 z-10 md:hidden shadow-2xl">
+        <nav class="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 fixed bottom-0 left-0 right-0 z-10 md:hidden shadow-2xl">
                     <div class="flex justify-around">
                         ${tabs.map(tab => {
                             const isActive = currentPage === tab.id;
-                            const activeClass = isActive ? 'text-green-main tab-active font-semibold' : 'text-gray-500 hover:text-green-main';
+                            const activeClass = isActive ? 'text-green-main tab-active font-semibold' : 'text-gray-500 dark:text-gray-300 hover:text-green-main';
                             // Usando o nome original no mobile
-                            const mobileName = tab.name; 
+                            const mobileName = tab.name; 
 
                             return `
                                 <a href="#${tab.id}" class="py-3 px-4 flex flex-col items-center space-y-1 ${activeClass} transition-colors border-b-2 border-transparent">
@@ -1160,24 +1215,24 @@ function renderLogin() {
                 <img src="https://usinapitangueiras.com.br/wp-content/uploads/2020/04/usina-pitangueiras-logo.png" alt="Logo Usina Pitangueiras"	
                     class="mx-auto h-20 w-auto mb-4"	
                     onerror="this.onerror=null; this.src='https://placehold.co/150x80/40800c/FFFFFF?text=Logo'; this.alt='Logo Placeholder'">
-                <h2 class="text-3xl font-extrabold text-gray-900">
+                <h2 class="text-3xl font-extrabold text-gray-900 dark:text-gray-100">
                     Acesso ao Sistema
                 </h2>
-                <p class="mt-2 text-sm text-gray-600">
+                <p class="mt-2 text-sm text-gray-600 dark:text-gray-300">
                     Use seu email ou nome de usuário e senha para continuar
                 </p>
             </div>
             <form id="login-form" class="mt-8 space-y-6">
                 <input type="text" id="login-input" placeholder="Email ou Nome de Usuário" required	
-                    class="appearance-none relative block w-full px-4 py-3 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-lg focus:outline-none focus:ring-green-main focus:border-green-main focus:z-10 sm:text-sm shadow-sm"
+                    class="appearance-none relative block w-full px-4 py-3 border border-gray-300 dark:border-gray-600 placeholder-gray-500 text-gray-900 dark:text-gray-100 dark:bg-gray-700 rounded-lg focus:outline-none focus:ring-green-main focus:border-green-main focus:z-10 sm:text-sm shadow-sm"
                     value="${savedLogin}"
                 >
                 <div class="relative">
                     <input type="password" id="password" placeholder="Senha" required	
-                        class="appearance-none relative block w-full px-4 py-3 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-lg focus:outline-none focus:ring-green-main focus:border-green-main focus:z-10 sm:text-sm shadow-sm pr-10"
+                        class="appearance-none relative block w-full px-4 py-3 border border-gray-300 dark:border-gray-600 placeholder-gray-500 text-gray-900 dark:text-gray-100 dark:bg-gray-700 rounded-lg focus:outline-none focus:ring-green-main focus:border-green-main focus:z-10 sm:text-sm shadow-sm pr-10"
                         value=""
                     >
-                    <button type="button" id="toggle-password" class="absolute inset-y-0 right-0 px-3 flex items-center text-gray-500 hover:text-gray-700 focus:outline-none" title="Mostrar/Ocultar Senha">
+                    <button type="button" id="toggle-password" class="absolute inset-y-0 right-0 px-3 flex items-center text-gray-500 dark:text-gray-300 hover:text-gray-700 dark:hover:text-gray-100 focus:outline-none" title="Mostrar/Ocultar Senha">
                         <i id="toggle-password-icon" class="fas fa-eye"></i>
                     </button>
                 </div>
@@ -1185,8 +1240,8 @@ function renderLogin() {
                 <div class="flex items-center justify-between">
                     <div class="flex items-center">
                         <input id="remember-me" name="remember-me" type="checkbox" ${rememberMeChecked}
-                            class="h-4 w-4 text-green-main border-gray-300 rounded focus:ring-green-main">
-                        <label for="remember-me" class="ml-2 block text-sm text-gray-900">
+                            class="h-4 w-4 text-green-main border-gray-300 dark:border-gray-600 rounded focus:ring-green-main">
+                        <label for="remember-me" class="ml-2 block text-sm text-gray-900 dark:text-gray-100">
                             Lembrar Login
                         </label>
                     </div>
@@ -1200,7 +1255,7 @@ function renderLogin() {
             </form>
             
             <button type="button" onclick="updateState('loginView', 'solicitar')"
-                class="group relative w-full flex justify-center py-3 px-4 border border-gray-300 text-sm font-medium rounded-lg text-gray-700 bg-white hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-all shadow-md mt-4">
+                class="group relative w-full flex justify-center py-3 px-4 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-all shadow-md mt-4">
                 <i class="fas fa-user-plus mr-2 text-indigo-500"></i>
                 Solicitar Acesso
             </button>
@@ -1210,10 +1265,10 @@ function renderLogin() {
     }
 
     return `
-        <div class="flex items-center justify-center min-h-screen bg-gray-900">
-            <div class="w-full max-w-md p-8 space-y-8 bg-white/95 backdrop-blur-sm rounded-xl shadow-2xl border border-green-main/30">
+        <div class="flex items-center justify-center min-h-screen bg-gray-900 dark:bg-gray-900">
+            <div class="w-full max-w-md p-8 space-y-8 bg-white/95 dark:bg-gray-800/95 backdrop-blur-sm rounded-xl shadow-2xl border border-green-main/30 dark:border-green-main/50">
                 ${content}
-                <p class="text-xs text-center text-gray-500">
+                <p class="text-xs text-center text-gray-500 dark:text-gray-400">
                     Usina Pitangueiras - "A ENERGIA QUE MOVE A REGIÃO"
                 </p>
             </div>
@@ -1224,34 +1279,34 @@ function renderLogin() {
 function renderSolicitarAcesso() {
     return `
         <div class="text-center">
-            <h2 class="text-3xl font-extrabold text-gray-900">
+            <h2 class="text-3xl font-extrabold text-gray-900 dark:text-gray-100">
                 Solicitar Acesso
             </h2>
-            <p class="mt-2 text-sm text-gray-600">
+            <p class="mt-2 text-sm text-gray-600 dark:text-gray-300">
                 Preencha seus dados para enviar a solicitação de perfil.
             </p>
         </div>
         <form id="form-solicitar-acesso" class="mt-8 space-y-4" onsubmit="handleSolicitarAcesso(event)">
             <div>
                 <input type="text" name="solicitar-name" placeholder="Nome Completo" required	
-                    class="appearance-none relative block w-full px-4 py-3 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-lg focus:outline-none focus:ring-green-main focus:border-green-main sm:text-sm shadow-sm"
+                    class="appearance-none relative block w-full px-4 py-3 border border-gray-300 dark:border-gray-600 placeholder-gray-500 text-gray-900 dark:text-gray-100 dark:bg-gray-700 rounded-lg focus:outline-none focus:ring-green-main focus:border-green-main sm:text-sm shadow-sm"
                 >
             </div>
             <div>
                 <input type="email" name="solicitar-email" placeholder="Email (obrigatório para solicitação)" required	
-                    class="appearance-none relative block w-full px-4 py-3 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-lg focus:outline-none focus:ring-green-main focus:border-green-main sm:text-sm shadow-sm"
+                    class="appearance-none relative block w-full px-4 py-3 border border-gray-300 dark:border-gray-600 placeholder-gray-500 text-gray-900 dark:text-gray-100 dark:bg-gray-700 rounded-lg focus:outline-none focus:ring-green-main focus:border-green-main sm:text-sm shadow-sm"
                 >
             </div>
             <div>
                 <input type="tel" name="solicitar-phone" placeholder="Telefone (WhatsApp)" required	
-                    class="appearance-none relative block w-full px-4 py-3 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-lg focus:outline-none focus:ring-green-main focus:ring-green-main sm:text-sm shadow-sm"
+                    class="appearance-none relative block w-full px-4 py-3 border border-gray-300 dark:border-gray-600 placeholder-gray-500 text-gray-900 dark:text-gray-100 dark:bg-gray-700 rounded-lg focus:outline-none focus:ring-green-main focus:ring-green-main sm:text-sm shadow-sm"
                 >
             </div>
             <div>
                 <input type="password" name="solicitar-temp-password" placeholder="Senha Provisória (Mín. 6 caracteres)" required minlength="6"	
-                    class="appearance-none relative block w-full px-4 py-3 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-lg focus:outline-none focus:ring-green-main focus:border-green-main sm:text-sm shadow-sm"
+                    class="appearance-none relative block w-full px-4 py-3 border border-gray-300 dark:border-gray-600 placeholder-gray-500 text-gray-900 dark:text-gray-100 dark:bg-gray-700 rounded-lg focus:outline-none focus:ring-green-main focus:border-green-main sm:text-sm shadow-sm"
                 >
-                <p class="mt-1 text-xs text-gray-500 text-left">A senha provisória será usada para configurar seu acesso inicial.</p>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400 text-left">A senha provisória será usada para configurar seu acesso inicial.</p>
             </div>
             
             <button type="submit"	
@@ -1261,7 +1316,7 @@ function renderSolicitarAcesso() {
             </button>
 
             <button type="button" onclick="updateState('loginView', 'login')"
-                class="group relative w-full flex justify-center py-2 px-4 border border-gray-300 text-sm font-medium rounded-lg text-gray-700 bg-white hover:bg-gray-100 transition-all shadow-sm mt-3">
+                class="group relative w-full flex justify-center py-2 px-4 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 transition-all shadow-sm mt-3">
                 <i class="fas fa-arrow-left mr-2"></i>
                 Voltar para Login
             </button>
@@ -1271,7 +1326,7 @@ function renderSolicitarAcesso() {
 
 function renderLoadingScreen() {
     return `
-        <div class="flex flex-col items-center justify-center min-h-screen bg-gray-900">
+        <div class="flex flex-col items-center justify-center min-h-screen bg-gray-900 dark:bg-gray-900">
             <img src="https://usinapitangueiras.com.br/wp-content/uploads/2020/04/usina-pitangueiras-logo.png" alt="Logo Usina Pitangueiras"	
                 class="h-40 w-auto mb-10 loader-logo-full"	
                 onerror="this.onerror=null; this.src='https://placehold.co/200x100/40800c/FFFFFF?text=Logo'; this.alt='Logo Placeholder'">
@@ -1279,7 +1334,7 @@ function renderLoadingScreen() {
             <h1 class="text-3xl font-extrabold text-green-main tracking-widest loading-text-animate">
                 SISTEMA RÁDIOS
             </h1>
-            <p class="mt-4 text-sm text-gray-300 italic loading-text-animate">Aguarde o carregamento...</p>
+            <p class="mt-4 text-sm text-gray-300 dark:text-gray-300 italic loading-text-animate">Aguarde o carregamento...</p>
         </div>
     `;
 }
@@ -1340,7 +1395,7 @@ function getUserAvatar(user) {
     // Pega as iniciais do nome
     const initials = (user.name || 'NN').split(' ').map(n => n[0]).join('').toUpperCase();
     // Simula URL de foto (se disponível no objeto user, embora não seja comum no Auth sem provedor social)
-    const photoURL = user.photoURL || null; 
+    const photoURL = user.photoURL || null; 
 
     if (photoURL) {
         return `<img src="${photoURL}" alt="Avatar de ${user.name}" class="h-8 w-8 rounded-full object-cover shadow-md" onerror="this.onerror=null; this.src='https://placehold.co/32x32/40800c/FFFFFF?text=${initials}';">`;
@@ -1383,21 +1438,21 @@ function renderDashboard() {
 
     const cardData = [
         // Usando a nova cor verde e SVGs
-        { title: 'Total de Rádios (Ativos)', value: radioStats.total, iconSvg: getRadioIcon(), color: 'bg-green-main' }, 
+        { title: 'Total de Rádios (Ativos)', value: radioStats.total, iconSvg: getRadioIcon(), color: 'bg-green-main' }, 
         { title: 'Rádios Ativos (Em Frota)', value: radioStats.ativos, iconSvg: getActiveRadioIcon(), color: 'bg-indigo-500' },
         { title: 'Rádios em Manutenção', value: radioStats.manutencao, iconSvg: getMaintenanceIcon(), color: 'bg-yellow-600' },
         { title: 'Rádios Em Estoque (Disponível)', value: radioStats.estoque, iconSvg: getWarehouseIcon(), color: 'bg-blue-600' },
     ];
     
     const cardHtml = cardData.map(card => `
-        <div class="bg-white rounded-xl p-6 shadow-xl futuristic-card border border-gray-100">
+        <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-xl futuristic-card border border-gray-100 dark:border-gray-700">
             <div class="flex flex-col items-start space-y-3">
                 <div class="p-3 rounded-xl ${card.color} text-white shadow-lg flex items-center justify-center">
                     ${card.iconSvg}
                 </div>
                 <div>
-                    <p class="text-sm font-medium text-gray-500 uppercase tracking-widest">${card.title}</p>
-                    <p class="text-4xl font-extrabold text-gray-900 mt-1">${card.value}</p>
+                    <p class="text-sm font-medium text-gray-500 dark:text-gray-400 uppercase tracking-widest">${card.title}</p>
+                    <p class="text-4xl font-extrabold text-gray-900 dark:text-gray-100 mt-1">${card.value}</p>
                 </div>
             </div>
         </div>
@@ -1407,12 +1462,12 @@ function renderDashboard() {
         const count = groupCounts[group] || 0;
         const letter = settings.letterMap[group] || 'N/A';	
         return `
-            <tr class="dashboard-table-row border-b">
-                <td class="px-6 py-3 whitespace-nowrap text-sm font-medium text-gray-900 flex items-center justify-between">
+            <tr class="dashboard-table-row border-b dark:border-gray-700">
+                <td class="px-6 py-3 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-gray-100 flex items-center justify-between">
                     ${group}	
-                    <span class="text-xs font-semibold text-gray-400">(${letter})</span>
+                    <span class="text-xs font-semibold text-gray-400 dark:text-gray-500">(${letter})</span>
                 </td>
-                <td class="px-6 py-3 whitespace-nowrap text-sm text-gray-700 font-bold">${count}</td>
+                <td class="px-6 py-3 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300 font-bold">${count}</td>
             </tr>
         `;
     }).join('');
@@ -1422,25 +1477,25 @@ function renderDashboard() {
     // Removendo a DEMO dos rádio botões do Dashboard, pois eles foram movidos para a navegação
     return `
         <div class="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
-            <h2 class="text-3xl font-bold text-gray-900 mb-6 text-center">Dashboard de Rádios e Frota</h2>
+            <h2 class="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-6 text-center">Dashboard de Rádios e Frota</h2>
 
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
                 ${cardHtml}
             </div>
-            <div class="bg-white rounded-xl shadow-xl p-6 border border-gray-200 futuristic-card">
-                <h3 class="text-xl font-semibold text-gray-800 mb-4 flex items-center">
+            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-xl p-6 border border-gray-200 dark:border-gray-700 futuristic-card">
+                <h3 class="text-xl font-semibold text-gray-800 dark:text-gray-100 mb-4 flex items-center">
                     <i class="fas fa-boxes mr-2 text-green-main"></i>	
                     Equipamentos com Rádio Ativo (Total: ${totalEquipamentos})
                 </h3>
                 <div class="overflow-x-auto">
-                    <table class="min-w-full divide-y divide-gray-200">
-                        <thead class="bg-green-main/10">
+                    <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                        <thead class="bg-green-main/10 dark:bg-green-main/30">
                             <tr>
-                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider w-3/5">Grupo</th>
-                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider w-2/5">Rádios Ativos</th>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-600 dark:text-gray-200 uppercase tracking-wider w-3/5">Grupo</th>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-600 dark:text-gray-200 uppercase tracking-wider w-2/5">Rádios Ativos</th>
                             </tr>
                         </thead>
-                        <tbody class="bg-white divide-y divide-gray-200">
+                        <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                             ${tableRows}
                         </tbody>
                     </table>
@@ -1459,7 +1514,7 @@ function renderCadastro() {
     
     const tabNav = tabs.map(tab => {
         const isActive = currentCadastroTab === tab.id;
-        const activeClass = isActive ? 'text-green-main border-green-main font-semibold' : 'text-gray-500 border-transparent hover:text-green-main';
+        const activeClass = isActive ? 'text-green-main border-green-main font-semibold' : 'text-gray-500 dark:text-gray-300 border-transparent hover:text-green-main';
         return `<button data-tab="${tab.id}" class="py-2 px-4 border-b-2 ${activeClass} transition-colors text-sm sm:text-base">${tab.name}</button>`;
     }).join('');
     
@@ -1472,9 +1527,9 @@ function renderCadastro() {
 
     return `
         <div class="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
-            <h2 class="text-3xl font-bold text-gray-900 mb-6 text-center">Cadastro de Rádios e Equipamentos</h2>
-            <div class="bg-white rounded-xl shadow-lg border border-gray-200">
-                <div id="cadastro-nav" class="flex border-b border-gray-200 px-6 pt-2 overflow-x-auto">${tabNav}</div>
+            <h2 class="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-6 text-center">Cadastro de Rádios e Equipamentos</h2>
+            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700">
+                <div id="cadastro-nav" class="flex border-b border-gray-200 dark:border-gray-700 px-6 pt-2 overflow-x-auto">${tabNav}</div>
                 <div class="p-6">${content}</div>
             </div>
         </div>
@@ -1497,7 +1552,7 @@ function renderCadastroRadio() {
         const bAtivo = b.ativo !== false;
 
         if (aAtivo && !bAtivo) return -1; // Ativo vem antes do inativo
-        if (!aAtivo && bAtivo) return 1;  // Inativo vem depois do ativo
+        if (!aAtivo && bAtivo) return 1;  // Inativo vem depois do ativo
         
         // Se o status for o mesmo (ambos ativos ou ambos inativos), ordena por série.
         return a.serie.localeCompare(b.serie);
@@ -1509,29 +1564,29 @@ function renderCadastroRadio() {
 
     const tableRows = paginatedRadios.map(r => {
         const isAtivo = r.ativo !== false;
-        const rowClass = isAtivo ? 'hover:bg-gray-50 border-b' : 'hover:bg-red-50 border-b opacity-60 italic';
+        const rowClass = isAtivo ? 'hover:bg-gray-50 dark:hover:bg-gray-700/50 border-b dark:border-gray-700' : 'hover:bg-red-50 dark:hover:bg-red-900/10 border-b dark:border-gray-700 opacity-60 italic';
         const statusText = isAtivo ? r.status || 'Disponível' : 'INATIVO';
         const statusClass = isAtivo ? (r.status === 'Disponível' ? 'text-green-main' : (r.status === 'Manutenção' ? 'text-yellow-600' : 'text-blue-600')) : 'text-red-600';
         
-        // Usa text-gray-700 para manter a cor do texto do item inativo em cinza, 
+        // Usa text-gray-700 para manter a cor do texto do item inativo em cinza, 
         // apenas a coluna do status e a linha de fundo muda.
         return `
             <tr class="${rowClass}">
-                <td class="px-4 py-2 text-sm text-gray-700 font-mono">${r.serie}</td>
-                <td class="px-4 py-2 text-sm text-gray-700">${r.modelo}</td>
+                <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 font-mono">${r.serie}</td>
+                <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300">${r.modelo}</td>
                 <td class="px-4 py-2 text-sm font-semibold ${statusClass}">${statusText}</td>
                 <td class="px-4 py-2 whitespace-nowrap text-sm font-medium space-x-2">
-                    <button onclick="loadRadioForEdit('${r.id}')" class="text-indigo-600 hover:text-indigo-900 p-1 rounded-full hover:bg-indigo-50" title="Editar Rádio">
+                    <button onclick="loadRadioForEdit('${r.id}')" class="text-indigo-600 hover:text-indigo-900 p-1 rounded-full hover:bg-indigo-50 dark:hover:bg-gray-700" title="Editar Rádio">
                         <i class="fas fa-edit"></i>
                     </button>
                     ${(() => {
                         const actionText = isAtivo ? 'INATIVAR' : 'ATIVAR';
                         // Invertendo a lógica da cor do ícone no toggle: se ATIVO, mostra o ícone verde, se INATIVO, mostra o ícone cinza.
-                        const iconClass = isAtivo ? 'fa-toggle-on text-green-main' : 'fa-toggle-off text-gray-500'; 
+                        const iconClass = isAtivo ? 'fa-toggle-on text-green-main' : 'fa-toggle-off text-gray-500 dark:text-gray-400'; 
                         const btnClass = isAtivo ? 'hover:text-red-900' : 'hover:text-green-main';
                         const title = isAtivo ? 'Inativar Rádio' : 'Ativar Rádio';
                         return `
-                        <button onclick="showConfirmModal('Confirmar ${actionText}ÇÃO', 'Deseja realmente ${actionText} o Rádio ${r.serie}?', () => toggleRecordAtivo('radios', '${r.id}'))" class="${btnClass} p-1 rounded-full hover:bg-gray-100" title="${title}">
+                        <button onclick="showConfirmModal('Confirmar ${actionText}ÇÃO', 'Deseja realmente ${actionText} o Rádio ${r.serie}?', () => toggleRecordAtivo('radios', '${r.id}'))" class="${btnClass} p-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700" title="${title}">
                             <i class="fas ${iconClass} fa-lg"></i>
                         </button>
                         `;
@@ -1545,32 +1600,32 @@ function renderCadastroRadio() {
     if (filteredRadios.length > PAGE_SIZE) {
         radioPaginator = '<div class="flex justify-center items-center space-x-2 mt-4">';
         // CORREÇÃO: Chama a função global
-        radioPaginator += `<button ${radioPage === 1 ? 'disabled' : ''} onclick="setRadioPage(-1)" class="px-2 py-1 text-sm rounded-md ${radioPage === 1 ? 'bg-gray-100 text-gray-400' : 'bg-gray-200 hover:bg-gray-300'}">Anterior</button>`;
-        radioPaginator += `<span class="text-sm font-medium text-gray-700">Pág ${radioPage} de ${totalRadioPages}</span>`;
+        radioPaginator += `<button ${radioPage === 1 ? 'disabled' : ''} onclick="setRadioPage(-1)" class="px-2 py-1 text-sm rounded-md ${radioPage === 1 ? 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500' : 'bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500 text-gray-700 dark:text-gray-100'}">Anterior</button>`;
+        radioPaginator += `<span class="text-sm font-medium text-gray-700 dark:text-gray-300">Pág ${radioPage} de ${totalRadioPages}</span>`;
         // CORREÇÃO: Chama a função global
-        radioPaginator += `<button ${radioPage === totalRadioPages ? 'disabled' : ''} onclick="setRadioPage(1)" class="px-2 py-1 text-sm rounded-md ${radioPage === totalRadioPages ? 'bg-gray-100 text-gray-400' : 'bg-gray-300 hover:bg-gray-400'}">Próxima</button>`;
+        radioPaginator += `<button ${radioPage === totalRadioPages ? 'disabled' : ''} onclick="setRadioPage(1)" class="px-2 py-1 text-sm rounded-md ${radioPage === totalRadioPages ? 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500' : 'bg-gray-300 dark:bg-gray-600 hover:bg-gray-400 dark:hover:bg-gray-500 text-gray-700 dark:text-gray-100'}">Próxima</button>`;
         radioPaginator += '</div>';
     }
 
     return `
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div class="lg:col-span-1 bg-gray-50 p-4 rounded-xl shadow-inner border border-gray-200">
-                <h4 class="text-lg font-semibold text-gray-800 mb-4">Novo/Editar Rádio</h4>
+            <div class="lg:col-span-1 bg-gray-50 dark:bg-gray-900 p-4 rounded-xl shadow-inner border border-gray-200 dark:border-gray-700">
+                <h4 class="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">Novo/Editar Rádio</h4>
                 <form id="form-radio" class="space-y-4">
                     <input type="hidden" id="radio-id">
                     <div>
-                        <label for="radio-serie" class="block text-sm font-medium text-gray-700">Número de Série <span class="text-red-500">*</span></label>
+                        <label for="radio-serie" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Número de Série <span class="text-red-500">*</span></label>
                         <input type="text" id="radio-serie" required placeholder="Ex: 112sar234s"
-                            class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-main focus:ring-green-main p-2 border">
+                            class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-green-main focus:ring-green-main p-2 border dark:bg-gray-700 dark:text-gray-100">
                     </div>
                     <div>
-                        <label for="radio-modelo" class="block text-sm font-medium text-gray-700">Modelo de Rádio <span class="text-red-500">*</span></label>
+                        <label for="radio-modelo" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Modelo de Rádio <span class="text-red-500">*</span></label>
                         <input type="text" id="radio-modelo" required placeholder="Ex: EM200"
-                            class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-main focus:ring-green-main p-2 border">
+                            class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-green-main focus:ring-green-main p-2 border dark:bg-gray-700 dark:text-gray-100">
                     </div>
                     <div>
-                        <label for="radio-status" class="block text-sm font-medium text-gray-700">Status</label>
-                        <select id="radio-status" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-main focus:ring-green-main p-2 border bg-white">
+                        <label for="radio-status" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Status</label>
+                        <select id="radio-status" class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-green-main focus:ring-green-main p-2 border bg-white dark:bg-gray-700 dark:text-gray-100">
                             <option value="Disponível">Disponível</option>
                             <option value="Manutenção">Manutenção</option>
                             <option value="Em Uso" disabled>Em Uso (automático)</option>
@@ -1580,7 +1635,7 @@ function renderCadastroRadio() {
                         <button type="submit" class="flex-1 w-full flex justify-center py-2 px-3 border border-transparent text-sm font-medium rounded-lg text-white bg-green-main hover:bg-green-700 shadow-md">
                             <i class="fas fa-save mr-2"></i> Salvar
                         </button>
-                        <button type="button" onclick="document.getElementById('form-radio').reset(); document.getElementById('radio-id').value='';" class="w-1/4 flex justify-center py-2 px-3 border border-gray-300 text-sm font-medium rounded-lg text-gray-700 bg-white hover:bg-gray-100 shadow-sm">
+                        <button type="button" onclick="document.getElementById('form-radio').reset(); document.getElementById('radio-id').value='';" class="w-1/4 flex justify-center py-2 px-3 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 shadow-sm">
                             <i class="fas fa-redo"></i>
                         </button>
                     </div>
@@ -1590,7 +1645,7 @@ function renderCadastroRadio() {
                     <button onclick="document.getElementById('radio-import-file').click()" class="flex-1 flex justify-center py-2 px-3 border border-transparent text-sm font-medium rounded-lg text-white bg-indigo-500 hover:bg-indigo-600 shadow-md">
                         <i class="fas fa-upload mr-2"></i> Importar (csv, xlsx)
                     </button>
-                    <button onclick="showModal('Instruções de Importação - Rádio', RADIO_IMPORT_INFO, 'info')" class="ml-2 p-2 text-indigo-500 hover:text-indigo-700 transition-colors rounded-full" title="Instruções de arquivo">
+                    <button onclick="showModal('Instruções de Importação - Rádio', window.RADIO_IMPORT_INFO, 'info')" class="ml-2 p-2 text-indigo-500 hover:text-indigo-700 transition-colors rounded-full" title="Instruções de arquivo">
                         <i class="fas fa-info-circle"></i>
                     </button>
                 </div>
@@ -1598,43 +1653,43 @@ function renderCadastroRadio() {
 
             <div class="lg:col-span-2">
                 <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center mb-4 gap-2">
-                    <h4 class="text-lg font-semibold text-gray-800">Rádios Cadastrados (Ativos: ${activeRadiosCount})</h4>
+                    <h4 class="text-lg font-semibold text-gray-800 dark:text-gray-100">Rádios Cadastrados (Ativos: ${activeRadiosCount})</h4>
                     <input type="text" id="radio-search-input" value="${radioSearch}"	
                         oninput="handleSearchInput(this, 'radioSearch', 1)"	
                         placeholder="Buscar Série ou Modelo..."	
-                        class="rounded-md border-gray-300 shadow-sm focus:border-green-main focus:ring-green-main p-2 border text-sm w-full sm:w-1/2">
+                        class="rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-green-main focus:ring-green-main p-2 border text-sm w-full sm:w-1/2 dark:bg-gray-700 dark:text-gray-100">
                 </div>
-                <div class="bg-white border rounded-xl shadow-inner overflow-x-auto">
-                    <table class="min-w-full divide-y divide-gray-200">
-                        <thead class="bg-gray-50">
+                <div class="bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-xl shadow-inner overflow-x-auto">
+                    <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                        <thead class="bg-gray-50 dark:bg-gray-900">
                             <tr>
-                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Série</th>
-                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Modelo</th>
-                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Ações</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Série</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Modelo</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Status</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Ações</th>
                             </tr>
                         </thead>
-                        <tbody class="bg-white divide-y divide-gray-200">${paginatedRadios.map(r => {
+                        <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">${paginatedRadios.map(r => {
                             const isAtivo = r.ativo !== false;
-                            const rowClass = isAtivo ? 'hover:bg-gray-50 border-b' : 'hover:bg-red-50 border-b opacity-60 italic';
+                            const rowClass = isAtivo ? 'hover:bg-gray-50 dark:hover:bg-gray-700/50 border-b dark:border-gray-700' : 'hover:bg-red-50 dark:hover:bg-red-900/10 border-b dark:border-gray-700 opacity-60 italic';
                             const statusText = isAtivo ? r.status || 'Disponível' : 'INATIVO';
                             const statusClass = isAtivo ? (r.status === 'Disponível' ? 'text-green-main' : (r.status === 'Manutenção' ? 'text-yellow-600' : 'text-blue-600')) : 'text-red-600';
                             return `
                                 <tr class="${rowClass}">
-                                    <td class="px-4 py-2 text-sm text-gray-700 font-mono">${r.serie}</td>
-                                    <td class="px-4 py-2 text-sm text-gray-700">${r.modelo}</td>
+                                    <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 font-mono">${r.serie}</td>
+                                    <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300">${r.modelo}</td>
                                     <td class="px-4 py-2 text-sm font-semibold ${statusClass}">${statusText}</td>
                                     <td class="px-4 py-2 whitespace-nowrap text-sm font-medium space-x-2">
-                                        <button onclick="loadRadioForEdit('${r.id}')" class="text-indigo-600 hover:text-indigo-900 p-1 rounded-full hover:bg-indigo-50" title="Editar Rádio">
+                                        <button onclick="loadRadioForEdit('${r.id}')" class="text-indigo-600 hover:text-indigo-900 p-1 rounded-full hover:bg-indigo-50 dark:hover:bg-gray-700" title="Editar Rádio">
                                             <i class="fas fa-edit"></i>
                                         </button>
                                         ${(() => {
                                             const actionText = isAtivo ? 'INATIVAR' : 'ATIVAR';
-                                            const iconClass = isAtivo ? 'fa-toggle-on text-green-main' : 'fa-toggle-off text-gray-500'; 
+                                            const iconClass = isAtivo ? 'fa-toggle-on text-green-main' : 'fa-toggle-off text-gray-500 dark:text-gray-400';
                                             const btnClass = isAtivo ? 'hover:text-red-900' : 'hover:text-green-main';
                                             const title = isAtivo ? 'Inativar Rádio' : 'Ativar Rádio';
                                             return `
-                                            <button onclick="showConfirmModal('Confirmar ${actionText}ÇÃO', 'Deseja realmente ${actionText} o Rádio ${r.serie}?', () => toggleRecordAtivo('radios', '${r.id}'))" class="${btnClass} p-1 rounded-full hover:bg-gray-100" title="${title}">
+                                            <button onclick="showConfirmModal('Confirmar ${actionText}ÇÃO', 'Deseja realmente ${actionText} o Rádio ${r.serie}?', () => toggleRecordAtivo('radios', '${r.id}'))" class="${btnClass} p-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700" title="${title}">
                                                 <i class="fas ${iconClass} fa-lg"></i>
                                             </button>
                                             `;
@@ -1669,7 +1724,7 @@ function renderCadastroEquipamento() {
         const bAtivo = b.ativo !== false;
 
         if (aAtivo && !bAtivo) return -1; // Ativo vem antes do inativo
-        if (!aAtivo && bAtivo) return 1;  // Inativo vem depois do ativo
+        if (!aAtivo && bAtivo) return 1;  // Inativo vem depois do ativo
 
         // Se o status for o mesmo, ordena por frota
         return a.frota.localeCompare(b.frota);
@@ -1681,28 +1736,28 @@ function renderCadastroEquipamento() {
     
     const tableRows = paginatedEquipamentos.map(e => {
         const isAtivo = e.ativo !== false;
-        const rowClass = isAtivo ? 'hover:bg-gray-50 border-b' : 'hover:bg-red-50 border-b opacity-60 italic';
-        const frotaClass = isAtivo ? 'text-gray-700' : 'text-red-700';
+        const rowClass = isAtivo ? 'hover:bg-gray-50 dark:hover:bg-gray-700/50 border-b dark:border-gray-700' : 'hover:bg-red-50 dark:hover:bg-red-900/10 border-b dark:border-gray-700 opacity-60 italic';
+        const frotaClass = isAtivo ? 'text-gray-700 dark:text-gray-300' : 'text-red-700 dark:text-red-400';
 
         return `
             <tr class="${rowClass}">
                 <td class="px-4 py-2 text-sm ${frotaClass} font-mono">${e.frota} ${isAtivo ? '' : '(INATIVO)'}</td>
-                <td class="px-4 py-2 text-sm text-gray-700">${e.grupo}</td>
-                <td class="px-4 py-2 text-sm text-gray-700">${e.modelo}</td>
-                <td class="px-4 py-2 text-sm text-gray-700 hidden md:table-cell">${e.subgrupo || 'N/A'}</td>
-                <td class="px-4 py-2 text-sm text-gray-700 hidden lg:table-cell">${e.gestor || 'N/A'}</td>
+                <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300">${e.grupo}</td>
+                <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300">${e.modelo}</td>
+                <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hidden md:table-cell">${e.subgrupo || 'N/A'}</td>
+                <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hidden lg:table-cell">${e.gestor || 'N/A'}</td>
                 <td class="px-4 py-2 whitespace-nowrap text-sm font-medium space-x-2">
-                    <button onclick="loadEquipamentoForEdit('${e.id}')" class="text-indigo-600 hover:text-indigo-900 p-1 rounded-full hover:bg-indigo-50" title="Editar Equipamento">
+                    <button onclick="loadEquipamentoForEdit('${e.id}')" class="text-indigo-600 hover:text-indigo-900 p-1 rounded-full hover:bg-indigo-50 dark:hover:bg-gray-700" title="Editar Equipamento">
                         <i class="fas fa-edit"></i>
                     </button>
                     ${(() => {
                         const actionText = isAtivo ? 'INATIVAR' : 'ATIVAR';
                         // Invertendo a lógica da cor do ícone no toggle
-                        const iconClass = isAtivo ? 'fa-toggle-on text-green-main' : 'fa-toggle-off text-gray-500';
+                        const iconClass = isAtivo ? 'fa-toggle-on text-green-main' : 'fa-toggle-off text-gray-500 dark:text-gray-400';
                         const btnClass = isAtivo ? 'hover:text-red-900' : 'hover:text-green-main';
                         const title = isAtivo ? 'Inativar Equipamento' : 'Ativar Equipamento';
                         return `
-                        <button onclick="showConfirmModal('Confirmar ${actionText}ÇÃO', 'Deseja realmente ${actionText} o Equipamento ${e.frota}?', () => toggleRecordAtivo('equipamentos', '${e.id}'))" class="${btnClass} p-1 rounded-full hover:bg-gray-100" title="${title}">
+                        <button onclick="showConfirmModal('Confirmar ${actionText}ÇÃO', 'Deseja realmente ${actionText} o Equipamento ${e.frota}?', () => toggleRecordAtivo('equipamentos', '${e.id}'))" class="${btnClass} p-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700" title="${title}">
                             <i class="fas ${iconClass} fa-lg"></i>
                         </button>
                         `;
@@ -1718,52 +1773,52 @@ function renderCadastroEquipamento() {
     if (filteredEquipamentos.length > PAGE_SIZE) {
         equipamentoPaginator = '<div class="flex justify-center items-center space-x-2 mt-4">';
         // CORREÇÃO: Chama a função global
-        equipamentoPaginator += `<button ${equipamentoPage === 1 ? 'disabled' : ''} onclick="setEquipamentoPage(-1)" class="px-2 py-1 text-sm rounded-md ${equipamentoPage === 1 ? 'bg-gray-100 text-gray-400' : 'bg-gray-200 hover:bg-gray-300'}">Anterior</button>`;
-        equipamentoPaginator += `<span class="text-sm font-medium text-gray-700">Pág ${equipamentoPage} de ${totalEquipamentoPages}</span>`;
+        equipamentoPaginator += `<button ${equipamentoPage === 1 ? 'disabled' : ''} onclick="setEquipamentoPage(-1)" class="px-2 py-1 text-sm rounded-md ${equipamentoPage === 1 ? 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500' : 'bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500 text-gray-700 dark:text-gray-100'}">Anterior</button>`;
+        equipamentoPaginator += `<span class="text-sm font-medium text-gray-700 dark:text-gray-300">Pág ${equipamentoPage} de ${totalEquipamentoPages}</span>`;
         // CORREÇÃO: Chama a função global
-        equipamentoPaginator += `<button ${equipamentoPage === totalEquipamentoPages ? 'disabled' : ''} onclick="setEquipamentoPage(1)" class="px-2 py-1 text-sm rounded-md ${equipamentoPage === totalEquipamentoPages ? 'bg-gray-100 text-gray-400' : 'bg-gray-300 hover:bg-gray-400'}">Próxima</button>`;
+        equipamentoPaginator += `<button ${equipamentoPage === totalEquipamentoPages ? 'disabled' : ''} onclick="setEquipamentoPage(1)" class="px-2 py-1 text-sm rounded-md ${equipamentoPage === totalEquipamentoPages ? 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500' : 'bg-gray-300 dark:bg-gray-600 hover:bg-gray-400 dark:hover:bg-gray-500 text-gray-700 dark:text-gray-100'}">Próxima</button>`;
         equipamentoPaginator += '</div>';
     }
 
     return `
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div class="lg:col-span-1 bg-gray-50 p-4 rounded-xl shadow-inner border border-gray-200">
-                <h4 class="text-lg font-semibold text-gray-800 mb-4">Novo/Editar Equipamento</h4>
+            <div class="lg:col-span-1 bg-gray-50 dark:bg-gray-900 p-4 rounded-xl shadow-inner border border-gray-200 dark:border-gray-700">
+                <h4 class="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">Novo/Editar Equipamento</h4>
                 <form id="form-equipamento" class="space-y-4">
                     <input type="hidden" id="equipamento-id">
                     <div>
-                        <label for="equipamento-frota" class="block text-sm font-medium text-gray-700">Frota <span class="text-red-500">*</span></label>
+                        <label for="equipamento-frota" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Frota <span class="text-red-500">*</span></label>
                         <input type="text" id="equipamento-frota" required placeholder="Ex: 123456"
-                            class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-main focus:ring-green-main p-2 border">
+                            class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-green-main focus:ring-green-main p-2 border dark:bg-gray-700 dark:text-gray-100">
                     </div>
                     <div>
-                        <label for="equipamento-grupo" class="block text-sm font-medium text-gray-700">Grupo <span class="text-red-500">*</span></label>
+                        <label for="equipamento-grupo" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Grupo <span class="text-red-500">*</span></label>
                         <select id="equipamento-grupo" required
-                            class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-main focus:ring-green-main p-2 border bg-white">
+                            class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-green-main focus:ring-green-main p-2 border bg-white dark:bg-gray-700 dark:text-gray-100">
                             <option value="">Selecione o Grupo</option>
                             ${groupOptions}
                         </select>
                     </div>
                     <div>
-                        <label for="equipamento-modelo" class="block text-sm font-medium text-gray-700">Modelo do Equipamento <span class="text-red-500">*</span></label>
+                        <label for="equipamento-modelo" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Modelo do Equipamento <span class="text-red-500">*</span></label>
                         <input type="text" id="equipamento-modelo" required placeholder="Ex: Trator XYZ"
-                            class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-main focus:ring-green-main p-2 border">
+                            class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-green-main focus:ring-green-main p-2 border dark:bg-gray-700 dark:text-gray-100">
                     </div>
                     <div>
-                        <label for="equipamento-subgrupo" class="block text-sm font-medium text-gray-700">Subgrupo <span class="text-red-500">*</span></label>
+                        <label for="equipamento-subgrupo" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Subgrupo <span class="text-red-500">*</span></label>
                         <input type="text" id="equipamento-subgrupo" required placeholder="Ex: Ferirrigação, Tratos Culturais"
-                            class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-main focus:ring-green-main p-2 border">
+                            class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-green-main focus:ring-green-main p-2 border dark:bg-gray-700 dark:text-gray-100">
                     </div>
                     <div>
-                        <label for="equipamento-gestor" class="block text-sm font-medium text-gray-700">Gestor (Opcional)</label>
+                        <label for="equipamento-gestor" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Gestor (Opcional)</label>
                         <input type="text" id="equipamento-gestor" placeholder="Ex: João da Silva"
-                            class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-main focus:ring-green-main p-2 border">
+                            class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-green-main focus:ring-green-main p-2 border dark:bg-gray-700 dark:text-gray-100">
                     </div>
                     <div class="flex space-x-3">
                         <button type="submit" class="flex-1 w-full flex justify-center py-2 px-3 border border-transparent text-sm font-medium rounded-lg text-white bg-green-main hover:bg-green-700 shadow-md">
                             <i class="fas fa-save mr-2"></i> Salvar
                         </button>
-                        <button type="button" onclick="document.getElementById('form-equipamento').reset(); document.getElementById('equipamento-id').value='';" class="w-1/4 flex justify-center py-2 px-3 border border-gray-300 text-sm font-medium rounded-lg text-gray-700 bg-white hover:bg-gray-100 shadow-sm">
+                        <button type="button" onclick="document.getElementById('form-equipamento').reset(); document.getElementById('equipamento-id').value='';" class="w-1/4 flex justify-center py-2 px-3 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 shadow-sm">
                             <i class="fas fa-redo"></i>
                         </button>
                     </div>
@@ -1773,54 +1828,54 @@ function renderCadastroEquipamento() {
                     <button onclick="document.getElementById('equipamento-import-file').click()" class="flex-1 flex justify-center py-2 px-3 border border-transparent text-sm font-medium rounded-lg text-white bg-indigo-500 hover:bg-indigo-600 shadow-md">
                         <i class="fas fa-upload mr-2"></i> Importar (csv, xlsx)
                     </button>
-                    <button onclick="showModal('Instruções de Importação - Equipamento', EQUIPAMENTO_IMPORT_INFO, 'info')" class="ml-2 p-2 text-indigo-500 hover:text-indigo-700 transition-colors rounded-full" title="Instruções de arquivo">
+                    <button onclick="showModal('Instruções de Importação - Equipamento', window.EQUIPAMENTO_IMPORT_INFO, 'info')" class="ml-2 p-2 text-indigo-500 hover:text-indigo-700 transition-colors rounded-full" title="Instruções de arquivo">
                         <i class="fas fa-info-circle"></i>
                     </button>
                 </div>
             </div>
             <div class="lg:col-span-2">
                 <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center mb-4 gap-2">
-                    <h4 class="text-lg font-semibold text-gray-800">Equipamentos Cadastrados (Ativos: ${activeEquipamentosCount})</h4>
+                    <h4 class="text-lg font-semibold text-gray-800 dark:text-gray-100">Equipamentos Cadastrados (Ativos: ${activeEquipamentosCount})</h4>
                     <input type="text" id="equip-search-input" value="${equipamentoSearch}"	
                         oninput="handleSearchInput(this, 'equipamentoSearch', 1)"	
                         placeholder="Buscar Frota, Grupo ou Modelo..."	
-                        class="rounded-md border-gray-300 shadow-sm focus:border-green-main focus:ring-green-main p-2 border text-sm w-full sm:w-1/2">
+                        class="rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-green-main focus:ring-green-main p-2 border text-sm w-full sm:w-1/2 dark:bg-gray-700 dark:text-gray-100">
                 </div>
-                <div class="bg-white border rounded-xl shadow-inner overflow-x-auto">
-                    <table class="min-w-full divide-y divide-gray-200">
-                        <thead class="bg-gray-50">
+                <div class="bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-xl shadow-inner overflow-x-auto">
+                    <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                        <thead class="bg-gray-50 dark:bg-gray-900">
                             <tr>
-                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Frota</th>
-                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Grupo</th>
-                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Modelo</th>
-                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase hidden md:table-cell">Subgrupo</th>
-                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase hidden lg:table-cell">Gestor</th>
-                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Ações</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Frota</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Grupo</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Modelo</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase hidden md:table-cell">Subgrupo</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase hidden lg:table-cell">Gestor</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Ações</th>
                             </tr>
                         </thead>
-                        <tbody class="bg-white divide-y divide-gray-200">${paginatedEquipamentos.map(e => {
+                        <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">${paginatedEquipamentos.map(e => {
                             const isAtivo = e.ativo !== false;
-                            const rowClass = isAtivo ? 'hover:bg-gray-50 border-b' : 'hover:bg-red-50 border-b opacity-60 italic';
-                            const frotaClass = isAtivo ? 'text-gray-700' : 'text-red-700';
+                            const rowClass = isAtivo ? 'hover:bg-gray-50 dark:hover:bg-gray-700/50 border-b dark:border-gray-700' : 'hover:bg-red-50 dark:hover:bg-red-900/10 border-b dark:border-gray-700 opacity-60 italic';
+                            const frotaClass = isAtivo ? 'text-gray-700 dark:text-gray-300' : 'text-red-700 dark:text-red-400';
 
                             return `
                                 <tr class="${rowClass}">
                                     <td class="px-4 py-2 text-sm ${frotaClass} font-mono">${e.frota} ${isAtivo ? '' : '(INATIVO)'}</td>
-                                    <td class="px-4 py-2 text-sm text-gray-700">${e.grupo}</td>
-                                    <td class="px-4 py-2 text-sm text-gray-700">${e.modelo}</td>
-                                    <td class="px-4 py-2 text-sm text-gray-700 hidden md:table-cell">${e.subgrupo || 'N/A'}</td>
-                                    <td class="px-4 py-2 text-sm text-gray-700 hidden lg:table-cell">${e.gestor || 'N/A'}</td>
+                                    <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300">${e.grupo}</td>
+                                    <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300">${e.modelo}</td>
+                                    <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hidden md:table-cell">${e.subgrupo || 'N/A'}</td>
+                                    <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hidden lg:table-cell">${e.gestor || 'N/A'}</td>
                                     <td class="px-4 py-2 whitespace-nowrap text-sm font-medium space-x-2">
-                                        <button onclick="loadEquipamentoForEdit('${e.id}')" class="text-indigo-600 hover:text-indigo-900 p-1 rounded-full hover:bg-indigo-50" title="Editar Equipamento">
+                                        <button onclick="loadEquipamentoForEdit('${e.id}')" class="text-indigo-600 hover:text-indigo-900 p-1 rounded-full hover:bg-indigo-50 dark:hover:bg-gray-700" title="Editar Equipamento">
                                             <i class="fas fa-edit"></i>
                                         </button>
                                         ${(() => {
                                             const actionText = isAtivo ? 'INATIVAR' : 'ATIVAR';
-                                            const iconClass = isAtivo ? 'fa-toggle-on text-green-main' : 'fa-toggle-off text-gray-500';
+                                            const iconClass = isAtivo ? 'fa-toggle-on text-green-main' : 'fa-toggle-off text-gray-500 dark:text-gray-400';
                                             const btnClass = isAtivo ? 'hover:text-red-900' : 'hover:text-green-main';
                                             const title = isAtivo ? 'Inativar Equipamento' : 'Ativar Equipamento';
                                             return `
-                                            <button onclick="showConfirmModal('Confirmar ${actionText}ÇÃO', 'Deseja realmente ${actionText} o Equipamento ${e.frota}?', () => toggleRecordAtivo('equipamentos', '${e.id}'))" class="${btnClass} p-1 rounded-full hover:bg-gray-100" title="${title}">
+                                            <button onclick="showConfirmModal('Confirmar ${actionText}ÇÃO', 'Deseja realmente ${actionText} o Equipamento ${e.frota}?', () => toggleRecordAtivo('equipamentos', '${e.id}'))" class="${btnClass} p-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700" title="${title}">
                                                 <i class="fas ${iconClass} fa-lg"></i>
                                             </button>
                                             `;
@@ -1881,14 +1936,14 @@ function renderCadastroGeral() {
         const codigo = e.codigo || reg.codigo || 'N/A'; // Prioriza código do equipamento
         
         return `
-            <tr class="hover:bg-gray-50 border-b">
-                <td class="px-4 py-2 text-sm text-gray-700 font-mono">${codigo}</td>
-                <td class="px-4 py-2 text-sm text-gray-700">${r.serie}</td>
-                <td class="px-4 py-2 text-sm text-gray-700">${e.frota}</td>
-                <td class="px-4 py-2 text-sm text-gray-700 hidden sm:table-cell">${e.grupo}</td>
-                <td class="px-4 py-2 text-sm text-gray-700 hidden md:table-cell">${e.subgrupo || 'N/A'}</td>
+            <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/50 border-b dark:border-gray-700">
+                <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 font-mono">${codigo}</td>
+                <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300">${r.serie}</td>
+                <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300">${e.frota}</td>
+                <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hidden sm:table-cell">${e.grupo}</td>
+                <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hidden md:table-cell">${e.subgrupo || 'N/A'}</td>
                 <td class="px-4 py-2 whitespace-nowrap text-sm font-medium">
-                    <button onclick="showConfirmModal('Confirmar Desvinculação', 'Deseja realmente desvincular o Rádio ${r.serie} da Frota ${e.frota}?', () => deleteRecord('registros', '${reg.id}'))" class="text-red-600 hover:text-red-900 p-1 rounded-full hover:bg-red-50" title="Desvincular Rádio">
+                    <button onclick="showConfirmModal('Confirmar Desvinculação', 'Deseja realmente desvincular o Rádio ${r.serie} da Frota ${e.frota}?', () => deleteRecord('registros', '${reg.id}'))" class="text-red-600 hover:text-red-900 p-1 rounded-full hover:bg-red-50 dark:hover:bg-gray-700" title="Desvincular Rádio">
                         <i class="fas fa-unlink"></i> Desvincular
                     </button>
                 </td>
@@ -1900,38 +1955,38 @@ function renderCadastroGeral() {
     if (filteredRegistros.length > PAGE_SIZE) {
         geralPaginator = '<div class="flex justify-center items-center space-x-2 mt-4">';
         // CORREÇÃO: Chama a função global
-        geralPaginator += `<button ${geralPage === 1 ? 'disabled' : ''} onclick="setGeralPage(-1)" class="px-2 py-1 text-sm rounded-md ${geralPage === 1 ? 'bg-gray-100 text-gray-400' : 'bg-gray-200 hover:bg-gray-300'}">Anterior</button>`;
-        geralPaginator += `<span class="text-sm font-medium text-gray-700">Pág ${geralPage} de ${totalGeralPages}</span>`;
+        geralPaginator += `<button ${geralPage === 1 ? 'disabled' : ''} onclick="setGeralPage(-1)" class="px-2 py-1 text-sm rounded-md ${geralPage === 1 ? 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500' : 'bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500 text-gray-700 dark:text-gray-100'}">Anterior</button>`;
+        geralPaginator += `<span class="text-sm font-medium text-gray-700 dark:text-gray-300">Pág ${geralPage} de ${totalGeralPages}</span>`;
         // CORREÇÃO: Chama a função global
-        geralPaginator += `<button ${geralPage === totalGeralPages ? 'disabled' : ''} onclick="setGeralPage(1)" class="px-2 py-1 text-sm rounded-md ${geralPage === totalGeralPages ? 'bg-gray-100 text-gray-400' : 'bg-gray-300 hover:bg-gray-400'}">Próxima</button>`;
+        geralPaginator += `<button ${geralPage === totalGeralPages ? 'disabled' : ''} onclick="setGeralPage(1)" class="px-2 py-1 text-sm rounded-md ${geralPage === totalGeralPages ? 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500' : 'bg-gray-300 dark:bg-gray-600 hover:bg-gray-400 dark:hover:bg-gray-500 text-gray-700 dark:text-gray-100'}">Próxima</button>`;
         geralPaginator += '</div>';
     }
 
     return `
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div class="lg:col-span-1 bg-gray-50 p-4 rounded-xl shadow-inner border border-gray-200">
-                <h4 class="text-lg font-semibold text-gray-800 mb-4">Gerar Código e Associar</h4>
+            <div class="lg:col-span-1 bg-gray-50 dark:bg-gray-900 p-4 rounded-xl shadow-inner border border-gray-200 dark:border-gray-700">
+                <h4 class="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">Gerar Código e Associar</h4>
                 <form id="form-geral" class="space-y-4">
                     <div>
-                        <label for="geral-radio-id" class="block text-sm font-medium text-gray-700">Número de Série (Rádio) <span class="text-red-500">*</span></label>
-                        <select id="geral-radio-id" required class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-main focus:ring-green-main p-2 border bg-white">
+                        <label for="geral-radio-id" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Número de Série (Rádio) <span class="text-red-500">*</span></label>
+                        <select id="geral-radio-id" required class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-green-main focus:ring-green-main p-2 border bg-white dark:bg-gray-700 dark:text-gray-100">
                             <option value="">Selecione um Rádio Disponível</option>
                             ${radioOptions}
                         </select>
-                        <p id="radio-modelo-info" class="mt-1 text-xs text-gray-500"></p>
+                        <p id="radio-modelo-info" class="mt-1 text-xs text-gray-500 dark:text-gray-400"></p>
                     </div>
                     <div>
-                        <label for="geral-equipamento-id" class="block text-sm font-medium text-gray-700">Frota (Equipamento) <span class="text-red-500">*</span></label>
-                        <select type="text" id="geral-equipamento-id" required class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-main focus:ring-green-main p-2 border bg-white">
+                        <label for="geral-equipamento-id" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Frota (Equipamento) <span class="text-red-500">*</span></label>
+                        <select type="text" id="geral-equipamento-id" required class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-green-main focus:ring-green-main p-2 border bg-white dark:bg-gray-700 dark:text-gray-100">
                             <option value="">Selecione a Frota</option>
                             ${frotaOptions}
                         </select>
                     </div>
-                    <div id="equipamento-info" class="space-y-2 text-sm p-3 bg-white rounded-lg border">
-                        <p><span class="font-semibold">Grupo:</span> <span id="info-grupo">N/A</span></p>
-                        <p><span class="font-semibold">Subgrupo:</span> <span id="info-subgrupo">N/A</span></p>	
-                        <p><span class="font-semibold">Gestor:</span> <span id="info-gestor">N/A</span></p>
-                        <p><span class="font-semibold">Código:</span> <span id="info-codigo">N/A</span></p>
+                    <div id="equipamento-info" class="space-y-2 text-sm p-3 bg-white dark:bg-gray-800 rounded-lg border dark:border-gray-700">
+                        <p class="text-gray-700 dark:text-gray-300"><span class="font-semibold">Grupo:</span> <span id="info-grupo">N/A</span></p>
+                        <p class="text-gray-700 dark:text-gray-300"><span class="font-semibold">Subgrupo:</span> <span id="info-subgrupo">N/A</span></p>	
+                        <p class="text-gray-700 dark:text-gray-300"><span class="font-semibold">Gestor:</span> <span id="info-gestor">N/A</span></p>
+                        <p class="text-gray-700 dark:text-gray-300"><span class="font-semibold">Código:</span> <span id="info-codigo">N/A</span></p>
                     </div>
                     <button type="submit" class="w-full flex justify-center py-2 px-3 border border-transparent text-sm font-medium rounded-lg text-white bg-green-main hover:bg-green-700 shadow-md">
                         <i class="fas fa-barcode mr-2"></i> Gerar e Cadastrar
@@ -1940,37 +1995,37 @@ function renderCadastroGeral() {
             </div>
             <div class="lg:col-span-2">
                 <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center mb-4 gap-2">
-                    <h4 class="text-lg font-semibold text-gray-800">Registros Ativos (Total: ${dbRegistros.length})</h4>
+                    <h4 class="text-lg font-semibold text-gray-800 dark:text-gray-100">Registros Ativos (Total: ${dbRegistros.length})</h4>
                     <input type="text" id="geral-search-input" value="${geralSearch}"	
                         oninput="handleSearchInput(this, 'geralSearch', 1)"	
                         placeholder="Buscar Código, Série ou Frota..."	
-                        class="rounded-md border-gray-300 shadow-sm focus:border-green-main focus:ring-green-main p-2 border text-sm w-full sm:w-1/2">
+                        class="rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-green-main focus:ring-green-main p-2 border text-sm w-full sm:w-1/2 dark:bg-gray-700 dark:text-gray-100">
                 </div>
-                <div class="bg-white border rounded-xl shadow-inner overflow-x-auto">
-                    <table class="min-w-full divide-y divide-gray-200">
-                        <thead class="bg-gray-50">
+                <div class="bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-xl shadow-inner overflow-x-auto">
+                    <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                        <thead class="bg-gray-50 dark:bg-gray-900">
                             <tr>
-                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Código</th>
-                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Série Rádio</th>
-                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Frota</th>
-                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase hidden sm:table-cell">Grupo</th>
-                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase hidden md:table-cell">Subgrupo</th>
-                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Ações</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Código</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Série Rádio</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Frota</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase hidden sm:table-cell">Grupo</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase hidden md:table-cell">Subgrupo</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Ações</th>
                             </tr>
                         </thead>
-                        <tbody class="bg-white divide-y divide-gray-200">${paginatedRegistros.map(reg => {
+                        <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">${paginatedRegistros.map(reg => {
                             const r = radioMap[reg.radioId] || { serie: 'N/A', modelo: 'N/A' };
                             const e = equipamentoMap[reg.equipamentoId] || { frota: 'N/A', grupo: 'N/A', subgrupo: 'N/A', codigo: null };
                             const codigo = e.codigo || reg.codigo || 'N/A'; // Prioriza código do equipamento
                             return `
-                                <tr class="hover:bg-gray-50 border-b">
-                                    <td class="px-4 py-2 text-sm text-gray-700 font-mono">${codigo}</td>
-                                    <td class="px-4 py-2 text-sm text-gray-700">${r.serie}</td>
-                                    <td class="px-4 py-2 text-sm text-gray-700">${e.frota}</td>
-                                    <td class="px-4 py-2 text-sm text-gray-700 hidden sm:table-cell">${e.grupo}</td>
-                                    <td class="px-4 py-2 text-sm text-gray-700 hidden md:table-cell">${e.subgrupo || 'N/A'}</td>
+                                <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/50 border-b dark:border-gray-700">
+                                    <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 font-mono">${codigo}</td>
+                                    <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300">${r.serie}</td>
+                                    <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300">${e.frota}</td>
+                                    <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hidden sm:table-cell">${e.grupo}</td>
+                                    <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hidden md:table-cell">${e.subgrupo || 'N/A'}</td>
                                     <td class="px-4 py-2 whitespace-nowrap text-sm font-medium">
-                                        <button onclick="showConfirmModal('Confirmar Desvinculação', 'Deseja realmente desvincular o Rádio ${r.serie} da Frota ${e.frota}?', () => deleteRecord('registros', '${reg.id}'))" class="text-red-600 hover:text-red-900 p-1 rounded-full hover:bg-red-50" title="Desvincular Rádio">
+                                        <button onclick="showConfirmModal('Confirmar Desvinculação', 'Deseja realmente desvincular o Rádio ${r.serie} da Frota ${e.frota}?', () => deleteRecord('registros', '${reg.id}'))" class="text-red-600 hover:text-red-900 p-1 rounded-full hover:bg-red-50 dark:hover:bg-gray-700" title="Desvincular Rádio">
                                             <i class="fas fa-unlink"></i> Desvincular
                                         </button>
                                     </td>
@@ -1993,12 +2048,12 @@ function renderPesquisa() {
             id: reg.id,	
             codigo: e.codigo || reg.codigo, // Prioriza código do equipamento
             serie: r.serie || 'N/A',
-            modeloRadio: r.modelo || 'N/A', 
+            modeloRadio: r.modelo || 'N/A', 
             frota: e.frota || 'N/A',
             modeloEquipamento: e.modelo || 'N/A',
-            grupo: e.grupo || 'N/A', 
+            grupo: e.grupo || 'N/A', 
             subgrupo: e.subgrupo || 'N/A',
-            gestor: e.gestor || 'N/A', 
+            gestor: e.gestor || 'N/A', 
             createdAt: reg.createdAt
         };
     });
@@ -2023,48 +2078,48 @@ function renderPesquisa() {
     
     // CORREÇÃO: Colunas separadas para melhor legibilidade
     const tableRows = filteredRecords.map(r => `
-        <tr class="hover:bg-gray-50 border-b">
-            <td class="px-3 py-2 text-sm font-semibold text-gray-900 font-mono">${r.codigo}</td>
-            <td class="px-3 py-2 text-sm text-gray-700">${r.frota}</td>
-            <td class="px-3 py-2 text-sm text-gray-700">${r.grupo}</td>
-            <td class="px-3 py-2 text-sm text-gray-700">${r.serie}</td>
-            <td class="px-3 py-2 text-sm text-gray-700 hidden sm:table-cell">${r.modeloRadio}</td>
-            <td class="px-3 py-2 text-sm text-gray-700 hidden md:table-cell">${r.subgrupo}</td>
-            <td class="px-3 py-2 text-sm text-gray-700 hidden lg:table-cell">${r.gestor}</td>
+        <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/50 border-b dark:border-gray-700">
+            <td class="px-3 py-2 text-sm font-semibold text-gray-900 dark:text-gray-100 font-mono">${r.codigo}</td>
+            <td class="px-3 py-2 text-sm text-gray-700 dark:text-gray-300">${r.frota}</td>
+            <td class="px-3 py-2 text-sm text-gray-700 dark:text-gray-300">${r.grupo}</td>
+            <td class="px-3 py-2 text-sm text-gray-700 dark:text-gray-300">${r.serie}</td>
+            <td class="px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hidden sm:table-cell">${r.modeloRadio}</td>
+            <td class="px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hidden md:table-cell">${r.subgrupo}</td>
+            <td class="px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hidden lg:table-cell">${r.gestor}</td>
         </tr>
     `).join('');
 
 
     return `
         <div class="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
-            <h2 class="text-3xl font-bold text-gray-900 mb-6 text-center">Pesquisa de Registros Ativos</h2>
-            <div class="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
+            <h2 class="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-6 text-center">Pesquisa de Registros Ativos</h2>
+            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
                 <div class="mb-4 flex space-x-2">
                     <input type="text" id="search-term" placeholder="Buscar por Código, Série, Frota, Subgrupo..."	
                         value="${currentSearchTerm}"	
                         oninput="handleSearchInput(this, '_searchTermTemp')"
-                        class="flex-1 rounded-md border-gray-300 shadow-sm focus:border-green-main focus:ring-green-main p-2 border"
+                        class="flex-1 rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-green-main focus:ring-green-main p-2 border dark:bg-gray-700 dark:text-gray-100"
                     >
                     <button id="search-button" onclick="document.getElementById('search-term').dispatchEvent(new Event('input'))" class="py-2 px-3 border border-transparent text-sm font-medium rounded-lg text-white bg-green-main hover:bg-green-700 shadow-md" title="Iniciar Busca">
                         <i class="fas fa-search"></i> <span class="hidden sm:inline">Buscar</span>
                     </button>
                 </div>
                 
-                <h4 class="text-lg font-semibold text-gray-800 mb-4 mt-6">Resultados (${filteredRecords.length})</h4>
-                <div class="bg-white border rounded-xl shadow-inner overflow-x-auto">
-                    <table class="min-w-full divide-y divide-gray-200">
-                        <thead class="bg-gray-50">
+                <h4 class="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4 mt-6">Resultados (${filteredRecords.length})</h4>
+                <div class="bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-xl shadow-inner overflow-x-auto">
+                    <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                        <thead class="bg-gray-50 dark:bg-gray-900">
                             <tr>
-                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Código</th>
-                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Frota</th>
-                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Grupo</th>
-                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Série</th>
-                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase hidden sm:table-cell">Modelo Rádio</th>
-                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase hidden md:table-cell">Subgrupo</th>
-                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase hidden lg:table-cell">Gestor</th>
+                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Código</th>
+                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Frota</th>
+                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Grupo</th>
+                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Série</th>
+                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase hidden sm:table-cell">Modelo Rádio</th>
+                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase hidden md:table-cell">Subgrupo</th>
+                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase hidden lg:table-cell">Gestor</th>
                             </tr>
                         </thead>
-                        <tbody class="bg-white divide-y divide-gray-200">${tableRows}</tbody>
+                        <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">${tableRows}</tbody>
                     </table>
                 </div>
             </div>
@@ -2087,7 +2142,7 @@ function renderSettings() {
 
     const tabNav = filteredTabs.map(tab => {
         const isActive = currentSettingTab === tab.id;
-        const activeClass = isActive ? 'text-green-main border-green-main font-semibold' : 'text-gray-500 border-transparent hover:text-green-main';
+        const activeClass = isActive ? 'text-green-main border-green-main font-semibold' : 'text-gray-500 dark:text-gray-300 border-transparent hover:text-green-main';
         return `
             <a href="#settings/${tab.id}" onclick="updateState('settingTab', '${tab.id}')" class="py-2 px-4 border-b-2 ${activeClass} transition-colors text-sm sm:text-base flex items-center space-x-2">
                 <i class="fas ${tab.icon}"></i>
@@ -2102,9 +2157,9 @@ function renderSettings() {
             content = renderSettingsSystem();
             break;
         case 'users':
-            content = isAdmin ? "Carregando usuários..." : `<p class="p-6 text-red-500 font-semibold">Acesso negado. Apenas administradores podem gerenciar usuários.</p>`;
+            content = isAdmin ? "Carregando usuários..." : `<p class="p-6 text-red-500 dark:text-red-400 font-semibold">Acesso negado. Apenas administradores podem gerenciar usuários.</p>`;
             if (isAdmin) {
-                content = '';
+                // Conteúdo de usuários será renderizado por renderSettingsUsers()
             }
             break;
         default:
@@ -2114,9 +2169,9 @@ function renderSettings() {
 
     return `
         <div class="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
-            <h2 class="text-3xl font-bold text-gray-900 mb-6 text-center">Configurações do Sistema</h2>
-            <div class="bg-white rounded-xl shadow-lg border border-gray-200">
-                <div id="settings-nav" class="flex border-b border-gray-200 px-6 pt-2 overflow-x-auto">${tabNav}</div>
+            <h2 class="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-6 text-center">Configurações do Sistema</h2>
+            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700">
+                <div id="settings-nav" class="flex border-b border-gray-200 dark:border-gray-700 px-6 pt-2 overflow-x-auto">${tabNav}</div>
                 <div id="settings-content" class="p-6">${content}</div>
             </div>
         </div>
@@ -2136,23 +2191,23 @@ function renderSettingsSystem() {
         const nextCodeDisplay = prefix ? (prefix === 'NUM' ? zpad(nextNum, 3) : prefix + zpad(nextNum, 3)) : 'N/A';
 
         return `
-            <div class="flex items-center space-x-4 border-b pb-3 mb-3">
-                <label class="w-1/3 text-sm font-medium text-gray-700">${group}</label>
+            <div class="flex items-center space-x-4 border-b pb-3 mb-3 dark:border-gray-600">
+                <label class="w-1/3 text-sm font-medium text-gray-700 dark:text-gray-300">${group}</label>
                 <input type="text" id="map-${group.replace(/\s/g, '')}" value="${prefix}" required maxlength="3"
-                    class="w-1/4 rounded-md border-gray-300 shadow-sm focus:border-green-main focus:ring-green-main p-2 border text-center font-mono uppercase"
+                    class="w-1/4 rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-green-main focus:ring-green-main p-2 border text-center font-mono uppercase dark:bg-gray-700 dark:text-gray-100"
                 >
-                <div class="w-1/4 text-sm text-gray-500">
+                <div class="w-1/4 text-sm text-gray-500 dark:text-gray-400">
                     Próximo: ${nextCodeDisplay}	
                 </div>
             </div>`;
     }).join('');
 
     return `
-        <h4 class="text-xl font-semibold text-gray-800 mb-6">Mapeamento de Letras por Grupo</h4>
+        <h4 class="text-xl font-semibold text-gray-800 dark:text-gray-100 mb-6">Mapeamento de Letras por Grupo</h4>
         <form id="form-settings-system" class="space-y-4 max-w-lg">
-            <p class="text-sm text-gray-600 mb-4">Defina a letra ou código para o prefixo do Código de Rastreamento. Use 'NUM' para código sequencial.</p>
-            <div class="bg-gray-50 p-4 rounded-lg shadow-inner border">
-                <div class="flex items-center space-x-4 font-bold text-sm text-gray-800 border-b-2 pb-2 mb-3">
+            <p class="text-sm text-gray-600 dark:text-gray-300 mb-4">Defina a letra ou código para o prefixo do Código de Rastreamento. Use 'NUM' para código sequencial.</p>
+            <div class="bg-gray-50 dark:bg-gray-900 p-4 rounded-lg shadow-inner border dark:border-gray-700">
+                <div class="flex items-center space-x-4 font-bold text-sm text-gray-800 dark:text-gray-100 border-b-2 pb-2 mb-3 dark:border-gray-600">
                     <span class="w-1/3">Grupo</span>
                     <span class="w-1/4 text-center">Prefixo</span>
                     <span class="w-1/4">Próx. Código</span>
@@ -2202,21 +2257,21 @@ async function renderSettingsUsers() {
         const loginMethod = u.customUsername ? u.customUsername : u.username;
 
         return `
-            <tr class="hover:bg-gray-50 border-b ${isCurrent ? 'bg-indigo-50/50' : ''}">
-                <td class="px-4 py-2 text-sm font-medium text-gray-900">${u.name} ${isCurrent ? '<span class="text-xs text-indigo-500">(Você)</span>' : ''}</td>
-                <td class="px-4 py-2 text-sm text-gray-700 font-mono break-words-all min-w-0">
-                    ${loginMethod} 
+            <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/50 border-b dark:border-gray-700 ${isCurrent ? 'bg-indigo-50/50 dark:bg-indigo-900/50' : ''}">
+                <td class="px-4 py-2 text-sm font-medium text-gray-900 dark:text-gray-100">${u.name} ${isCurrent ? '<span class="text-xs text-indigo-500">(Você)</span>' : ''}</td>
+                <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 font-mono break-words-all min-w-0">
+                    ${loginMethod} 
                     ${u.customUsername ? '<span class="text-xs text-green-main">(User Login)</span>' : '<span class="text-xs text-blue-500">(Email Login)</span>'}
                 </td>
                 <td class="px-4 py-2 text-sm font-semibold ${u.role === 'admin' ? 'text-green-main' : 'text-blue-600'}">${u.role.toUpperCase()}</td>
                 <td class="px-4 py-2 whitespace-nowrap text-sm font-medium space-x-2">
-                    <button onclick="loadUserForEdit('${u.id}')" ${canEditDelete ? '' : 'disabled'} class="text-indigo-600 hover:text-indigo-900 p-1 rounded-full hover:bg-indigo-50 ${canEditDelete ? '' : 'opacity-50 cursor-not-allowed'}" title="Editar Perfil">
+                    <button onclick="loadUserForEdit('${u.id}')" ${canEditDelete ? '' : 'disabled'} class="text-indigo-600 hover:text-indigo-900 p-1 rounded-full hover:bg-indigo-50 dark:hover:bg-gray-700 ${canEditDelete ? '' : 'opacity-50 cursor-not-allowed'}" title="Editar Perfil">
                         <i class="fas fa-edit"></i>
                     </button>
-                    <button onclick="showPermissionModal('${u.id}')" ${canEditDelete ? '' : 'disabled'} class="text-green-600 hover:text-green-900 p-1 rounded-full hover:bg-green-50 ${canEditDelete ? '' : 'opacity-50 cursor-not-allowed'}" title="Alterar permissões">
+                    <button onclick="showPermissionModal('${u.id}')" ${canEditDelete ? '' : 'disabled'} class="text-green-600 hover:text-green-900 p-1 rounded-full hover:bg-green-50 dark:hover:bg-gray-700 ${canEditDelete ? '' : 'opacity-50 cursor-not-allowed'}" title="Alterar permissões">
                         <i class="fas fa-user-cog"></i>
                     </button>
-                    <button onclick="showConfirmModal('Confirmar Exclusão', 'Deseja realmente excluir o perfil de ${u.name}? Isso é irreversível.', () => deleteUser('${u.id}'))" ${canEditDelete ? '' : 'disabled'} class="text-red-600 hover:text-red-900 p-1 rounded-full hover:bg-red-50 ${canEditDelete ? '' : 'opacity-50 cursor-not-allowed'}" title="Excluir Perfil">
+                    <button onclick="showConfirmModal('Confirmar Exclusão', 'Deseja realmente excluir o perfil de ${u.name}? Isso é irreversível.', () => deleteUser('${u.id}'))" ${canEditDelete ? '' : 'disabled'} class="text-red-600 hover:text-red-900 p-1 rounded-full hover:bg-red-50 dark:hover:bg-gray-700 ${canEditDelete ? '' : 'opacity-50 cursor-not-allowed'}" title="Excluir Perfil">
                         <i class="fas fa-trash-alt"></i>
                     </button>
                 </td>
@@ -2226,41 +2281,41 @@ async function renderSettingsUsers() {
 
     return `
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div class="lg:col-span-1 bg-gray-50 p-4 rounded-xl shadow-inner border border-gray-200">
-                <h4 id="user-form-title" class="text-lg font-semibold text-gray-800 mb-4">Novo Perfil de Usuário</h4>
+            <div class="lg:col-span-1 bg-gray-50 dark:bg-gray-900 p-4 rounded-xl shadow-inner border border-gray-200 dark:border-gray-700">
+                <h4 id="user-form-title" class="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">Novo Perfil de Usuário</h4>
                 <form id="form-user" class="space-y-4">
                     <input type="hidden" id="user-id">
                     <div>
-                        <label for="user-name" class="block text-sm font-medium text-gray-700">Nome Completo <span class="text-red-500">*</span></label>
+                        <label for="user-name" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Nome Completo <span class="text-red-500">*</span></label>
                         <input type="text" id="user-name" required placeholder="Ex: Maria da Silva"
-                            class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-main focus:ring-green-main p-2 border">
+                            class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-green-main focus:ring-green-main p-2 border dark:bg-gray-700 dark:text-gray-100">
                     </div>
                     
                     <div>
-                        <label for="user-custom-username" class="block text-sm font-medium text-gray-700">Nome de Usuário (Login Principal)</label>
+                        <label for="user-custom-username" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Nome de Usuário (Login Principal)</label>
                         <input type="text" id="user-custom-username" placeholder="Ex: mariasilva"
-                            class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-main focus:ring-green-main p-2 border">
+                            class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-green-main focus:ring-green-main p-2 border dark:bg-gray-700 dark:text-gray-100">
                     </div>
 
                     <div>
-                        <label for="user-username" class="block text-sm font-medium text-gray-700">Username (Email)</label>
+                        <label for="user-username" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Username (Email)</label>
                         <input type="email" id="user-username" placeholder="exemplo@empresa.com.br"
-                            class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-main focus:ring-green-main p-2 border">
-                        <p class="text-xs text-gray-500 mt-1">Deve ser um email válido ou deixe em branco se usar Nome de Usuário.</p>
-                        <p class="text-xs text-red-500 mt-1">Se em branco, um email genérico será criado para o Firebase Auth.</p>
+                            class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-green-main focus:ring-green-main p-2 border dark:bg-gray-700 dark:text-gray-100">
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Deve ser um email válido ou deixe em branco se usar Nome de Usuário.</p>
+                        <p class="text-xs text-red-500 dark:text-red-400 mt-1">Se em branco, um email genérico será criado para o Firebase Auth.</p>
                     </div>
                     
                     <div id="user-password-field">
-                        <label for="user-password" class="block text-sm font-medium text-gray-700">Senha (Mín. 6 caracteres)</label>
+                        <label for="user-password" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Senha (Mín. 6 caracteres)</label>
                         <input type="password" id="user-password" placeholder="Preencha para novo cadastro ou alteração de senha" minlength="6"
-                            class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-red-500 focus:ring-red-500 p-2 border">
-                        <p class="text-xs text-gray-500 mt-1">Obrigatório para novos usuários.</p>
+                            class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-red-500 focus:ring-red-500 p-2 border dark:bg-gray-700 dark:text-gray-100">
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Obrigatório para novos usuários.</p>
                     </div>
 
                     <div>
-                        <label for="user-role" class="block text-sm font-medium text-gray-700">Perfil/Role <span class="text-red-500">*</span></label>
+                        <label for="user-role" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Perfil/Role <span class="text-red-500">*</span></label>
                         <select id="user-role" required
-                            class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-main focus:ring-green-main p-2 border bg-white">
+                            class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-green-main focus:ring-green-main p-2 border bg-white dark:bg-gray-700 dark:text-gray-100">
                             <option value="user">Usuário Padrão</option>
                             <option value="admin">Administrador</option>
                         </select>
@@ -2269,7 +2324,7 @@ async function renderSettingsUsers() {
                         <button type="submit" class="flex-1 w-full flex justify-center py-2 px-3 border border-transparent text-sm font-medium rounded-lg text-white bg-green-main hover:bg-green-700 shadow-md">
                             <i class="fas fa-save mr-2"></i> Salvar Perfil
                         </button>
-                        <button type="button" id="user-reset-btn" class="w-1/4 flex justify-center py-2 px-3 border border-gray-300 text-sm font-medium rounded-lg text-gray-700 bg-white hover:bg-gray-100 shadow-sm">
+                        <button type="button" id="user-reset-btn" class="w-1/4 flex justify-center py-2 px-3 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 shadow-sm">
                             <i class="fas fa-redo"></i>
                         </button>
                     </div>
@@ -2277,22 +2332,22 @@ async function renderSettingsUsers() {
             </div>
 
             <div class="lg:col-span-2">
-                <h4 class="text-lg font-semibold text-gray-800 mb-4">Perfis Cadastrados (Total: ${usersFromDB.length})</h4>
-                <div class="bg-white border rounded-xl shadow-inner overflow-x-auto">
-                    <table class="min-w-full divide-y divide-gray-200">
-                        <thead class="bg-gray-50">
+                <h4 class="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">Perfis Cadastrados (Total: ${usersFromDB.length})</h4>
+                <div class="bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-xl shadow-inner overflow-x-auto">
+                    <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                        <thead class="bg-gray-50 dark:bg-gray-900">
                             <tr>
-                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Nome</th>
-                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase min-w-32">Login Principal</th>
-                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Perfil</th>
-                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Ações</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Nome</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase min-w-32">Login Principal</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Perfil</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Ações</th>
                             </tr>
                         </thead>
-                        <tbody class="bg-white divide-y divide-gray-200">${tableRows}</tbody>
+                        <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">${tableRows}</tbody>
                     </table>
                 </div>
-                <p class="mt-4 text-sm text-yellow-600">
-                    A exclusão ou edição do usuário principal (Admin) é bloqueada. 
+                <p class="mt-4 text-sm text-yellow-600 dark:text-yellow-400">
+                    A exclusão ou edição do usuário principal (Admin) é bloqueada. 
                     As permissões de um novo usuário ou de um 'admin' são definidas automaticamente no salvamento.
                 </p>
             </div>
@@ -2301,6 +2356,89 @@ async function renderSettingsUsers() {
 }
 
 // --- Funções de Eventos (DOM) ---
+
+// 🌟 NOVO: Salva o nome de exibição do usuário
+async function savePersonalName(e) {
+    e.preventDefault();
+    const newName = document.getElementById('profile-name').value.trim();
+    if (!newName) {
+        showModal('Erro', 'O nome não pode ser vazio.', 'error');
+        return;
+    }
+
+    const settingsDocRef = doc(db, "artifacts", appId, "public", "data", "settings", "config");
+    let usersFromDB = settings.users;
+    const userIndex = usersFromDB.findIndex(u => u.id === currentUser.id);
+
+    if (userIndex === -1) {
+        showModal('Erro', 'Seu perfil não foi encontrado no banco de dados.', 'error');
+        return;
+    }
+
+    usersFromDB[userIndex].name = newName;
+    currentUser.name = newName; // Atualiza o estado global
+
+    try {
+        await setDoc(settingsDocRef, { users: usersFromDB }, { merge: true });
+        showModal('Sucesso', 'Nome de exibição atualizado com sucesso!', 'success');
+        hideProfileModal();
+        renderApp();
+    } catch (e) {
+        showModal('Erro', 'Não foi possível salvar o nome.', 'error');
+    }
+}
+
+// 🌟 NOVO: Altera a senha do usuário logado (requer reautenticação)
+async function changePassword(e) {
+    e.preventDefault();
+    const newPassword = document.getElementById('profile-new-password').value;
+    const confirmPassword = document.getElementById('profile-confirm-password').value;
+
+    if (newPassword !== confirmPassword) {
+        showModal('Erro', 'As senhas não coincidem.', 'error');
+        return;
+    }
+    if (newPassword.length < 6) {
+        showModal('Erro', 'A nova senha deve ter no mínimo 6 caracteres.', 'error');
+        return;
+    }
+
+    try {
+        // Para usuários com email real (não fake), usamos o Firebase Auth
+        if (!currentUser.customUsername) {
+            // NOTE: updatePassword requer que o usuário tenha se logado recentemente
+            await updatePassword(auth.currentUser, newPassword);
+            showModal('Sucesso', 'Senha alterada com sucesso via Firebase Auth!', 'success');
+        } else {
+            // Para usuários customizados (com email fake), a senha deve ser salva no Firestore (método não-padrão)
+            const settingsDocRef = doc(db, "artifacts", appId, "public", "data", "settings", "config");
+            let usersFromDB = settings.users;
+            const userIndex = usersFromDB.findIndex(u => u.id === currentUser.id);
+
+            if (userIndex === -1) {
+                showModal('Erro', 'Seu perfil customizado não foi encontrado.', 'error');
+                return;
+            }
+
+            usersFromDB[userIndex].loginPassword = newPassword; // Salva a senha para o próximo login
+            await setDoc(settingsDocRef, { users: usersFromDB }, { merge: true });
+            showModal('Sucesso', 'Senha de login customizado alterada com sucesso!', 'success');
+        }
+        hideProfileModal();
+    } catch (e) {
+        console.error("Erro ao alterar senha:", e);
+        let msg = 'Erro ao alterar a senha. Você pode precisar fazer login novamente (reautenticação) para alterar a senha.';
+        if (e.code === 'auth/requires-recent-login') {
+            msg = 'Sua sessão expirou. Por favor, saia do sistema e faça login novamente para alterar sua senha.';
+        } else if (e.code === 'auth/weak-password') {
+            msg = 'A senha é muito fraca. Deve ter pelo menos 6 caracteres.';
+        } else if (e.code === 'auth/invalid-credential') {
+            msg = 'Credenciais inválidas. O nome de usuário/email pode estar incorreto.';
+        }
+        showModal('Erro de Senha', msg, 'error');
+    }
+}
+
 
 function handleSearchInput(inputElement, stateVariable, pageToReset = null) {
     const value = inputElement.value;
@@ -2373,17 +2511,17 @@ async function handleLoginSubmit(e) {
             }
         } else {
              // Não é email e não é customUsername
-            isLoggingIn = false;
-            renderApp();
-            showModal('Erro de Login', 'Login inválido. Tente novamente com email ou nome de usuário cadastrado.', 'error');
-            return;
+             isLoggingIn = false;
+             renderApp();
+             showModal('Erro de Login', 'Login inválido. Tente novamente com email ou nome de usuário cadastrado.', 'error');
+             return;
         }
     }
     
     // 3. Tenta autenticar no Firebase Auth com o emailToLogin
     try {
+        // Para logins customizados, a checagem de senha já foi feita acima.
         // O Firebase Auth cuida da checagem de senha para logins baseados em email normal.
-        // Para o login customizado, a checagem de senha já foi feita acima (appUser.loginPassword !== password).
         
         await signInWithEmailAndPassword(auth, emailToLogin, password);
         // Sucesso: onAuthStateChanged cuidará do resto
@@ -2743,7 +2881,7 @@ function attachSettingsEvents() {
     if (currentSettingTab === 'system') {
         attachSettingsSystemEvents();
     } else if (currentSettingTab === 'users' && currentUser && currentUser.role === 'admin') {
-        attachSettingsUsersEvents(); 
+        attachSettingsUsersEvents(); 
     }
 }
 
@@ -2822,10 +2960,10 @@ async function showPermissionModal(userId)
 
     const checkboxesHTML = allTabs.map(tab => `
         <div class="flex items-center">
-            <input id="perm-${tab.id}-${user.id}" type="checkbox" ${currentPerms[tab.id] ? 'checked' : ''} class="h-4 w-4 text-green-main border-gray-300 rounded focus:ring-green-main" ${tab.id === 'settings' && user.role !== 'admin' ? 'disabled' : ''}>
-            <label for="perm-${tab.id}-${user.id}" class="ml-2 block text-sm text-gray-900">
-                ${tab.name} 
-                ${tab.id === 'settings' && user.role !== 'admin' ? '<span class="text-xs text-red-500">(Admin-Only)</span>' : ''}
+            <input id="perm-${tab.id}-${user.id}" type="checkbox" ${currentPerms[tab.id] ? 'checked' : ''} class="h-4 w-4 text-green-main border-gray-300 dark:border-gray-600 rounded focus:ring-green-main dark:bg-gray-700" ${tab.id === 'settings' && user.role !== 'admin' ? 'disabled' : ''}>
+            <label for="perm-${tab.id}-${user.id}" class="ml-2 block text-sm text-gray-900 dark:text-gray-100">
+                ${tab.name} 
+                ${tab.id === 'settings' && user.role !== 'admin' ? '<span class="text-xs text-red-500 dark:text-red-400">(Admin-Only)</span>' : ''}
             </label>
         </div>
     `).join('');
@@ -2837,18 +2975,18 @@ async function showPermissionModal(userId)
 
     // Remove a classe 'max-w-sm' do modal principal para permitir mais espaço
     modal.querySelector('div').classList.remove('max-w-sm');
-    modal.querySelector('div').classList.add('max-w-lg'); 
+    modal.querySelector('div').classList.add('max-w-lg'); 
 
     titleEl.textContent = `Permissões de ${user.name}`;
     messageEl.innerHTML = `
-        <p class="text-sm text-gray-600 mb-4">Selecione as abas que este usuário pode acessar.</p>
+        <p class="text-sm text-gray-600 dark:text-gray-300 mb-4">Selecione as abas que este usuário pode acessar.</p>
         <div class="space-y-2">${checkboxesHTML}</div>
     `;
-    titleEl.className = `text-xl font-bold mb-3 text-gray-800`;	
+    titleEl.className = `text-xl font-bold mb-3 text-gray-800 dark:text-gray-100`;	
 
     actionsEl.innerHTML = `
         <button onclick="hideModal(); document.getElementById('global-modal').querySelector('div').classList.remove('max-w-lg'); document.getElementById('global-modal').querySelector('div').classList.add('max-w-sm');"
-                class="px-3 py-1.5 text-sm bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 shadow-md">Cancelar</button>
+                class="px-3 py-1.5 text-sm bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 shadow-md">Cancelar</button>
         <button id="confirm-action-btn" class="px-3 py-1.5 text-sm bg-green-main text-white rounded-lg hover:bg-green-700 shadow-md">Salvar</button>
     `;
     
@@ -2869,7 +3007,7 @@ async function showPermissionModal(userId)
             document.getElementById('global-modal').querySelector('div').classList.remove('max-w-lg');
             document.getElementById('global-modal').querySelector('div').classList.add('max-w-sm');
             showModal('Sucesso', `Permissões de ${user.name} atualizadas.`, 'success');
-            // Se estiver editando as próprias permissões, força um novo check de Auth e render
+            // Se estiver editando as próprias permissões, forçamos um novo check de Auth e render
             if (currentUser.id === userId) {
                 currentUser.permissions = newPermissions;
                 handleHashChange();
@@ -2951,14 +3089,14 @@ function setupAuthListener() {
                 
                 // [SOLUÇÃO DE CONTINGÊNCIA] Se for o Admin principal, forçamos a criação/uso do perfil Admin.
                 if (!appUser && user.email === ADMIN_PRINCIPAL_EMAIL) {
-                    appUser = { 
-                        id: user.uid, 
-                        name: "Juliano Timoteo (Admin Principal)", 
-                        username: ADMIN_PRINCIPAL_EMAIL, 
+                    appUser = { 
+                        id: user.uid, 
+                        name: "Juliano Timoteo (Admin Principal)", 
+                        username: ADMIN_PRINCIPAL_EMAIL, 
                         role: "admin",
                         permissions: { dashboard: true, cadastro: true, pesquisa: true, settings: true }
                     };
-                    // Adiciona o perfil à lista em memória e tenta salvar 
+                    // Adiciona o perfil à lista em memória e tenta salvar 
                     if (!settings.users.some(u => u.username === ADMIN_PRINCIPAL_EMAIL)) {
                         settings.users.push(appUser);
                         saveSettings();
@@ -2994,7 +3132,7 @@ function setupAuthListener() {
                 detachFirestoreListeners();	
                 dbRadios = []; dbEquipamentos = []; dbRegistros = [];
                 // Volta para a tela de login principal por padrão
-                updateState('loginView', 'login'); 
+                updateState('loginView', 'login'); 
                 renderApp();	
             }
         });
@@ -3014,11 +3152,11 @@ function initApp() {
         setLogLevel('info');	
         
         // [CORREÇÃO] O setupAuthListener agora chama loadInitialSettings antes do onAuthStateChanged
-        setupAuthListener(); 
+        setupAuthListener(); 
 
     } catch (e) {
         console.error("Erro crítico ao inicializar Firebase:", e);
-        document.getElementById('app').innerHTML = `<div class="p-4 text-red-500 font-semibold text-center">Erro crítico ao inicializar o Firebase. Verifique as configurações e a conexão.</div>`;
+        document.getElementById('app').innerHTML = `<div class="p-4 text-red-500 dark:text-red-400 font-semibold text-center">Erro crítico ao inicializar o Firebase. Verifique as configurações e a conexão.</div>`;
     }
 }
 
@@ -3039,7 +3177,7 @@ function renderApp() {
             currentPage = 'dashboard';
             window.location.hash = '#dashboard';
             contentHTML += renderDashboard();
-        } 
+        } 
         // Se a página não for acessível (baseado nas permissões)
         else if (!canAccessCurrentPage && currentPage !== 'login') {
             showModal('Acesso Negado', 'Você não tem permissão para acessar esta página.', 'error');
@@ -3091,8 +3229,8 @@ function renderApp() {
             if (settingsContent) {
                  // Evita re-renderizar se a aba mudou rapidamente
                  if (currentSettingTab === 'users') {
-                    settingsContent.innerHTML = html;
-                    attachSettingsUsersEvents();
+                     settingsContent.innerHTML = html;
+                     attachSettingsUsersEvents();
                  }
             }
         });
@@ -3162,11 +3300,11 @@ function showModal(title, message, type = 'info') {
     titleEl.textContent = title;
     messageEl.innerHTML = message.replace(/\n/g, '<br>');
     
-    let titleClass = 'text-gray-800';
+    let titleClass = 'text-gray-800 dark:text-gray-100';
     if (type === 'success') titleClass = 'text-green-main';
-    if (type === 'error') titleClass = 'text-red-600';
-    if (type === 'warning') titleClass = 'text-yellow-600';
-    if (type === 'info') titleClass = 'text-blue-600'; 
+    if (type === 'error') titleClass = 'text-red-600 dark:text-red-400';
+    if (type === 'warning') titleClass = 'text-yellow-600 dark:text-yellow-400';
+    if (type === 'info') titleClass = 'text-blue-600 dark:text-blue-400'; 
     titleEl.className = `text-xl font-bold mb-3 ${titleClass}`;
 
     actionsEl.innerHTML = `
@@ -3190,10 +3328,10 @@ function showConfirmModal(title, message, callback) {
 
     titleEl.textContent = title;
     messageEl.innerHTML = message.replace(/\n/g, '<br>');
-    titleEl.className = `text-xl font-bold mb-3 text-red-600`;	
+    titleEl.className = `text-xl font-bold mb-3 text-red-600 dark:text-red-400`;	
 
     actionsEl.innerHTML = `
-        <button onclick="hideModal()" class="px-3 py-1.5 text-sm bg-gray-200 text-gray-700 font-semibold rounded-lg hover:bg-gray-300 transition-colors shadow-md">
+        <button onclick="hideModal()" class="px-3 py-1.5 text-sm bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 font-semibold rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors shadow-md">
             Cancelar
         </button>
         <button id="confirm-action-btn" class="px-3 py-1.5 text-sm bg-red-600 text-white font-semibold rounded-lg hover:bg-red-700 transition-colors shadow-md">
@@ -3230,53 +3368,53 @@ function hideProfileModal() {
 function renderProfileModalContent() {
     const modalContent = document.getElementById('profile-modal-content');
     if (!currentUser) {
-        modalContent.innerHTML = '<p class="text-red-500">Erro: Usuário não logado.</p>';
+        modalContent.innerHTML = '<p class="text-red-500 dark:text-red-400">Erro: Usuário não logado.</p>';
         return;
     }
     
     // Layout centralizado para dispositivos móveis
     modalContent.innerHTML = `
         <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div class="bg-gray-50 p-4 rounded-xl shadow-inner border border-gray-200">
-                <h4 class="text-xl font-semibold text-gray-800 mb-3 flex items-center">
+            <div class="bg-gray-50 dark:bg-gray-900 p-4 rounded-xl shadow-inner border border-gray-200 dark:border-gray-700">
+                <h4 class="text-xl font-semibold text-gray-800 dark:text-gray-100 mb-3 flex items-center">
                     <i class="fas fa-user-edit mr-2 text-green-main"></i> Gerenciar Nome
                 </h4>
-                <p class="text-xs text-gray-600 mb-3">
+                <p class="text-xs text-gray-600 dark:text-gray-300 mb-3">
                     Altere o nome que aparece na barra superior.
                 </p>
                 <form id="form-personal-name" class="space-y-3">
                     <div>
-                        <label for="profile-name" class="block text-sm font-medium text-gray-700">Nome de Exibição Atual</label>
+                        <label for="profile-name" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Nome de Exibição Atual</label>
                         <input type="text" id="profile-name" required value="${currentUser.name}"
-                            class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-main focus:ring-green-main p-2 border text-sm">
+                            class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-green-main focus:ring-green-main p-2 border text-sm dark:bg-gray-700 dark:text-gray-100">
                     </div>
                     <button type="submit" class="w-full flex justify-center py-2 px-3 border border-transparent text-sm font-medium rounded-lg text-white bg-green-main hover:bg-green-700 shadow-md">
                         <i class="fas fa-save mr-2"></i> Salvar Nome
                     </button>
                 </form>
-                <div class="mt-4 p-3 bg-white border border-gray-200 rounded-lg text-xs text-gray-700 break-words-all">
+                <div class="mt-4 p-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-xs text-gray-700 dark:text-gray-300 break-words-all">
                     <p><span class="font-semibold">Seu Login Principal:</span> ${currentUser.customUsername || currentUser.email}</p>
                     <p><span class="font-semibold">Seu Perfil:</span> ${currentUser.role.toUpperCase()}</p>
                 </div>
             </div>
             
-            <div class="bg-gray-50 p-4 rounded-xl shadow-inner border border-red-200">
-                <h4 class="text-xl font-semibold text-gray-800 mb-3 flex items-center">
+            <div class="bg-gray-50 dark:bg-gray-900 p-4 rounded-xl shadow-inner border border-red-200 dark:border-red-700">
+                <h4 class="text-xl font-semibold text-gray-800 dark:text-gray-100 mb-3 flex items-center">
                     <i class="fas fa-key mr-2 text-red-600"></i> Alterar Senha
                 </h4>
-                <p class="text-xs text-red-600 mb-3">
+                <p class="text-xs text-red-600 dark:text-red-400 mb-3">
                     A nova senha deve ter no mínimo 6 caracteres.
                 </p>
                 <form id="form-change-password" class="space-y-3">
                     <div>
-                        <label for="profile-new-password" class="block text-sm font-medium text-gray-700">Nova Senha</label>
+                        <label for="profile-new-password" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Nova Senha</label>
                         <input type="password" id="profile-new-password" required minlength="6"
-                            class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-red-500 focus:ring-red-500 p-2 border text-sm">
+                            class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-red-500 focus:ring-red-500 p-2 border text-sm dark:bg-gray-700 dark:text-gray-100">
                     </div>
                     <div>
-                        <label for="profile-confirm-password" class="block text-sm font-medium text-gray-700">Confirmar Nova Senha</label>
+                        <label for="profile-confirm-password" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Confirmar Nova Senha</label>
                         <input type="password" id="profile-confirm-password" required minlength="6"
-                            class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-red-500 focus:ring-red-500 p-2 border text-sm">
+                            class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-red-500 focus:ring-red-500 p-2 border text-sm dark:bg-gray-700 dark:text-gray-100">
                     </div>
                     <button type="submit" class="w-full flex justify-center py-2 px-3 border border-transparent text-sm font-medium rounded-lg text-white bg-red-600 hover:bg-red-700 shadow-md">
                         <i class="fas fa-lock mr-2"></i> Alterar Senha
@@ -3305,8 +3443,8 @@ function hideDuplicityModal() {
 // Wrapper para exclusão que usa o modal de confirmação global
 function deleteDuplicityWrapper(collection, id, value) {
     const type = collection === 'radios' ? 'Rádio (Série)' : 'Equipamento (Frota)';
-    showConfirmModal('Confirmar Exclusão de Duplicidade', 
-        `Deseja **EXCLUIR PERMANENTEMENTE** o registro duplicado de ${type}: <b>${value}</b>?`, 
+    showConfirmModal('Confirmar Exclusão de Duplicidade', 
+        `Deseja **EXCLUIR PERMANENTEMENTE** o registro duplicado de ${type}: <b>${value}</b>?`, 
         () => deleteDuplicity(collection, id)
     );
 }
@@ -3414,7 +3552,7 @@ window.onhashchange = handleHashChange;
 window.showModal = showModal;
 window.showConfirmModal = showConfirmModal;
 window.hideModal = hideModal;
-window.handleImport = handleImport; 
+window.handleImport = handleImport; 
 window.handleLogout = handleLogout; // Expondo handleLogout
 window.handleSearchInput = handleSearchInput;
 window.loadRadioForEdit = loadRadioForEdit;
@@ -3439,5 +3577,20 @@ window.showDuplicityModal = showDuplicityModal;
 window.hideDuplicityModal = hideDuplicityModal;
 window.deleteDuplicity = deleteDuplicity;
 window.deleteDuplicityWrapper = deleteDuplicityWrapper;
+
+// Exposições de wrappers para modal de aprovação
+window.approveUserWrapper = approveUserWrapper;
+window.rejectUserWrapper = rejectUserWrapper;
+window.renderPendingApprovalsModal = renderPendingApprovalsModal;
+
+// Expondo as novas funções do modal de perfil (para uso no formulário)
+window.savePersonalName = savePersonalName;
+window.changePassword = changePassword;
+
+// 🌟 CORREÇÃO DE ERROS DE REFERÊNCIA: Expondo as constantes de Tooltip e Tema
+window.RADIO_IMPORT_INFO = RADIO_IMPORT_INFO;
+window.EQUIPAMENTO_IMPORT_INFO = EQUIPAMENTO_IMPORT_INFO;
+window.toggleTheme = toggleTheme;
+
 
 window.onload = initApp;

@@ -3660,4 +3660,5 @@ window.EQUIPAMENTO_IMPORT_INFO = EQUIPAMENTO_IMPORT_INFO;
 window.toggleTheme = toggleTheme;
 
 
+
 window.onload = initApp;

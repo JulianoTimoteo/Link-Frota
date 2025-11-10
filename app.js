@@ -63,15 +63,21 @@ let pendingUsers = [];
 let duplicities = [];
 
 // Paginação e Busca
-let radioPage = 1, equipamentoPage = 1, geralPage = 1, pesquisaPage = 1; // 🌟 NOVO: paginação para pesquisa
+// 🌟 ATUALIZADO: bordosPage adicionado
+let radioPage = 1, equipamentoPage = 1, bordosPage = 1, geralPage = 1, pesquisaPage = 1; 
 const PESQUISA_PAGE_SIZE = 10; // 🌟 NOVO: Tamanho fixo para pesquisa
-let radioSearch = '', equipamentoSearch = '', geralSearch = '';
+// 🌟 ATUALIZADO: bordosSearch adicionado
+let radioSearch = '', equipamentoSearch = '', bordosSearch = '', geralSearch = '';
 let focusedSearchInputId = null;
 let searchCursorPosition = 0;
 let searchTermPesquisa = ''; // 🌟 NOVO: Termo de busca da aba Pesquisa
 
 // Constantes de Configuração
 const GROUPS = ['Colheita', 'Transporte', 'Oficina', 'TPL', 'Industria'];
+// 🌟 ATUALIZADO: Status de Rádio e Bordo (Incluindo Sinistro)
+const DISPONIBLE_STATUSES = ['Disponível', 'Manutenção', 'Sinistro']; 
+// 🌟 NOVO: Tipos de Bordos
+const TIPOS_BORDO = ['Tela', 'Mag', 'Chip'];
 const DEFAULT_LETTER_MAP = {
     Colheita: 'A',
     Transporte: 'B', 
@@ -87,6 +93,8 @@ const ADMIN_PRINCIPAL_EMAIL = 'julianotimoteo@usinapitangueiras.com.br';
 // --- Estado do Banco de Dados (In-memory Cache) ---
 let dbRadios = [];
 let dbEquipamentos = [];
+// 🌟 NOVO: Cache de Bordos
+let dbBordos = [];
 let dbRegistros = [];
 let settings = {
     letterMap: DEFAULT_LETTER_MAP,
@@ -114,6 +122,18 @@ const EQUIPAMENTO_IMPORT_INFO = `
     </ul>
     <p class="mt-2"><span class="font-semibold">Coluna Opcional:</span> Gestor</p>
 `;
+
+// 🌟 NOVO: Constante de Tooltip para Bordos
+const BORDO_IMPORT_INFO = `
+    O arquivo CSV ou XLSX deve conter as seguintes colunas obrigatórias:
+    <ul class="list-disc list-inside mt-2 space-y-1">
+        <li class="font-semibold">Tipo (Deve ser: Tela, Mag ou Chip)</li>
+        <li class="font-semibold">Numero de Serie</li>
+        <li class="font-semibold">Modelo</li>
+    </ul>
+    <p class="mt-2 text-red-500 font-semibold">Atenção: A coluna "Tipo" deve ter um dos valores exatos: Tela, Mag ou Chip.</p>
+`;
+
 
 // 🌟 NOVO: Função central de verificação de duplicidades
 function checkDuplicities() {
@@ -172,6 +192,35 @@ function checkDuplicities() {
             });
         }
     });
+
+    // 3. Verificar Duplicidades de Bordos (Tipo + Número de Série)
+    const bordoSeriesCount = {};
+    dbBordos.forEach(b => {
+        // A chave de unicidade é Tipo + Série
+        const key = `${b.tipo}-${b.numeroSerie}`;
+        if (b.numeroSerie && b.tipo) {
+            if (!bordoSeriesCount[key]) {
+                bordoSeriesCount[key] = [];
+            }
+            bordoSeriesCount[key].push(b);
+        }
+    });
+
+    Object.values(bordoSeriesCount).forEach(list => {
+        if (list.length > 1) {
+            list.forEach(b => {
+                newDuplicities.push({
+                    id: b.id,
+                    type: `Bordo (${b.tipo})`,
+                    field: 'Número de Série',
+                    value: b.numeroSerie,
+                    createdAt: b.createdAt,
+                    collection: 'bordos'
+                });
+            });
+        }
+    });
+
 
     // Filtra duplicidades únicas e ordena por data de criação para melhor visualização
     duplicities = newDuplicities.filter((item, index, self) =>
@@ -244,10 +293,13 @@ async function attachFirestoreListeners() {
     const collectionsToSync = {
         'radios': (data) => dbRadios = data,
         'equipamentos': (data) => dbEquipamentos = data,
+        // 🌟 NOVO: Listener para Bordos
+        'bordos': (data) => dbBordos = data, 
         'registros': (data) => dbRegistros = data,
     };
 
     Object.keys(collectionsToSync).forEach(colName => {
+        // Coleções públicas (Regra 3)
         const colPath = `artifacts/${appId}/public/data/${colName}`;
         const q = query(collection(db, colPath));
          
@@ -325,10 +377,13 @@ function updateState(key, value) {
                 return;
             }
             currentPage = value;
-            currentCadastroTab = 'radio';	
+            // 🌟 ATUALIZADO: Nova aba de bordos é o default, se houver
+            currentCadastroTab = 'radio';
             currentSettingTab = 'system';
-            radioPage = 1; equipamentoPage = 1; geralPage = 1; pesquisaPage = 1; // Reset da paginação
-            radioSearch = ''; equipamentoSearch = ''; geralSearch = ''; searchTermPesquisa = ''; // Reset da busca
+            // Reset da paginação
+            radioPage = 1; equipamentoPage = 1, bordosPage = 1, geralPage = 1, pesquisaPage = 1; 
+            // Reset da busca
+            radioSearch = '', equipamentoSearch = '', bordosSearch = '', geralSearch = '', searchTermPesquisa = ''; 
             focusedSearchInputId = null;	
             break;
         case 'loginView':
@@ -365,6 +420,11 @@ function setRadioPage(delta) {
 }
 function setEquipamentoPage(delta) {
     equipamentoPage = Math.max(1, equipamentoPage + delta);
+    renderApp();
+}
+// 🌟 NOVO: Paginação para a aba Bordos
+function setBordosPage(delta) {
+    bordosPage = Math.max(1, bordosPage + delta);
     renderApp();
 }
 function setGeralPage(delta) {
@@ -430,11 +490,15 @@ async function saveRecord(collectionName, record) {
         } else {
             // Create
             recordData.createdAt = new Date().toISOString();
-            if (collectionName === 'radios' || collectionName === 'equipamentos') {
+            if (collectionName === 'radios' || collectionName === 'equipamentos' || collectionName === 'bordos') {
                 recordData.ativo = true;
             }
             if (collectionName === 'radios') {
                 recordData.status = recordData.status || 'Disponível';
+            }
+            if (collectionName === 'bordos') {
+                 // 🌟 NOVO: Status padrão para itens de bordo
+                recordData.status = 'Disponível'; 
             }
             delete recordData.id;	
             await addDoc(collection(db, colPath), recordData);
@@ -456,9 +520,8 @@ async function deleteRecord(collectionName, id) {
     const colPath = `artifacts/${appId}/public/data/${collectionName}`;
 
     try {
-        // Lógica mantida apenas para DESVINCULAÇÃO na aba 'Geral'
         if (collectionName === 'registros') {
-            // DESVINCULAÇÃO
+            // DESVINCULAÇÃO - Lógica do Registro Geral
             const regRef = doc(db, colPath, id);
             const regSnap = await getDoc(regRef);	
 
@@ -468,28 +531,47 @@ async function deleteRecord(collectionName, id) {
             }
 
             const registroRemovido = regSnap.data();
-            await deleteDoc(regRef);
+            const batch = writeBatch(db);
+
+            // 1. Remove o registro principal (Associação Rádio-Equipamento-Bordos)
+            batch.delete(regRef);
             
+            // 2. Atualiza o status do Rádio para "Disponível"
             if (registroRemovido && registroRemovido.radioId) {
-                // [CORREÇÃO] Usa appId hardcoded
                 const radioRef = doc(db, `artifacts/${appId}/public/data/radios`, registroRemovido.radioId);
-                await updateDoc(radioRef, { status: 'Disponível' });
+                batch.update(radioRef, { status: 'Disponível' });
             }
+
+            // 3. Atualiza o status dos Bordos para "Disponível" (se existirem)
+            if (registroRemovido.telaId) {
+                const telaRef = doc(db, `artifacts/${appId}/public/data/bordos`, registroRemovido.telaId);
+                batch.update(telaRef, { status: 'Disponível' });
+            }
+            if (registroRemovido.magId) {
+                const magRef = doc(db, `artifacts/${appId}/public/data/bordos`, registroRemovido.magId);
+                batch.update(magRef, { status: 'Disponível' });
+            }
+            if (registroRemovido.chipId) {
+                const chipRef = doc(db, `artifacts/${appId}/public/data/bordos`, registroRemovido.chipId);
+                batch.update(chipRef, { status: 'Disponível' });
+            }
+
+            await batch.commit();
             
-            showModal('Sucesso', 'Rádio desvinculado com sucesso!', 'success');
+            showModal('Sucesso', 'Associação desvinculada e itens atualizados com sucesso!', 'success');
         
         } else {
             // Lógica de inativação foi movida para toggleRecordAtivo
-            showModal('Erro', 'Ação não suportada.', 'error');
+            showModal('Erro', 'Ação não suportada. Use a função de Inativação/Ativação.', 'error');
         }
     } catch (error) {
-        console.error("Erro ao deletar/inativar registro:", error);
+        console.error("Erro ao deletar/desvincular registro:", error);
         showModal('Erro', 'Ocorreu um erro durante a operação.', 'error');
     }
 }
 
 async function toggleRecordAtivo(collectionName, id) {
-    if (!db || !appId || (collectionName !== 'radios' && collectionName !== 'equipamentos')) {
+    if (!db || !appId || (collectionName !== 'radios' && collectionName !== 'equipamentos' && collectionName !== 'bordos')) {
         showModal('Erro', 'Ação inválida.', 'error');
         return;
     }
@@ -520,6 +602,14 @@ async function toggleRecordAtivo(collectionName, id) {
                 showModal('Ação Bloqueada', 'Não é possível inativar um equipamento que possui um rádio vinculado.\n\nDesvincule na aba "Geral" primeiro.', 'error');
                 return;
             }
+            // 🌟 NOVO: Bloqueio para Bordos
+            if (collectionName === 'bordos') {
+                const isLinked = dbRegistros.some(reg => reg.telaId === id || reg.magId === id || reg.chipId === id);
+                if (isLinked) {
+                    showModal('Ação Bloqueada', `Não é possível inativar o Bordo (${currentData.tipo}) que está vinculado.\n\nDesvincule na aba "Geral" primeiro.`, 'error');
+                    return;
+                }
+            }
         }
         
         // Atualiza o status
@@ -541,10 +631,15 @@ async function deleteDuplicity(collectionName, id) {
     }
 
     // Bloqueia a exclusão se o item estiver vinculado a um registro ativo
-    const isLinked = collectionName === 'radios' 
-        ? dbRegistros.some(reg => reg.radioId === id)
-        : dbRegistros.some(reg => reg.equipamentoId === id);
-
+    let isLinked = false;
+    if (collectionName === 'radios') {
+        isLinked = dbRegistros.some(reg => reg.radioId === id);
+    } else if (collectionName === 'equipamentos') {
+        isLinked = dbRegistros.some(reg => reg.equipamentoId === id);
+    } else if (collectionName === 'bordos') {
+        isLinked = dbRegistros.some(reg => reg.telaId === id || reg.magId === id || reg.chipId === id);
+    }
+    
     if (isLinked) {
         showModal('Ação Bloqueada', 'Não é possível excluir este item. Ele está atualmente vinculado a um registro ativo.', 'warning');
         return;
@@ -1026,13 +1121,25 @@ function renderDuplicityModalContent() {
     let html = '';
 
     Object.values(groups).forEach(group => {
-        const typeLabel = group.collection === 'radios' ? 'Rádio (Série)' : 'Equipamento (Frota)';
+        // 🌟 ATUALIZADO: Inclui Bordos na label
+        let typeLabel;
+        if (group.collection === 'radios') typeLabel = 'Rádio (Série)';
+        else if (group.collection === 'equipamentos') typeLabel = 'Equipamento (Frota)';
+        else if (group.collection === 'bordos') typeLabel = `Bordo (Tipo/Série)`;
+        else typeLabel = 'Item Desconhecido';
+        
         const itemsList = group.items.map(item => {
             const date = new Date(item.createdAt).toLocaleString();
-            const isLinked = dbRegistros.some(reg => 
-                (item.collection === 'radios' && reg.radioId === item.id) || 
-                (item.collection === 'equipamentos' && reg.equipamentoId === item.id)
-            );
+            let isLinked = false;
+            // 🌟 ATUALIZADO: Checa vínculo para Bordos também
+            if (item.collection === 'radios') {
+                isLinked = dbRegistros.some(reg => reg.radioId === item.id);
+            } else if (item.collection === 'equipamentos') {
+                isLinked = dbRegistros.some(reg => reg.equipamentoId === item.id);
+            } else if (item.collection === 'bordos') {
+                isLinked = dbRegistros.some(reg => reg.telaId === item.id || reg.magId === item.id || reg.chipId === item.id);
+            }
+            
             const actionButton = isLinked 
                 ? `<span class="text-xs font-semibold text-red-500 bg-red-100 dark:bg-red-800/50 dark:text-red-300 px-2 py-1 rounded-full">EM USO</span>`
                 : `<button onclick="deleteDuplicityWrapper('${item.collection}', '${item.id}', '${item.value}')" class="px-3 py-1 text-xs bg-red-500 text-white rounded-lg hover:bg-red-600 shadow-md transition-colors">
@@ -1399,6 +1506,44 @@ function getWarehouseIcon() {
     `;
 }
 
+function getSinistroIcon() {
+    // Símbolo de Alerta/Perigo/Risco
+    return `
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+            <line x1="12" y1="9" x2="12" y2="13"></line>
+            <line x1="12" y1="17" x2="12" y2="17"></line>
+        </svg>
+    `;
+}
+
+// 🌟 NOVO: Ícone para itens de Bordo
+function getBordoIcon() {
+    // Símbolo de chip / circuito
+    return `
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect>
+            <rect x="9" y="9" width="6" height="6"></rect>
+            <path d="M15 2h2"></path><path d="M15 22h2"></path><path d="M2 15v2"></path><path d="M22 15v2"></path>
+            <path d="M9 2h-2"></path><path d="M9 22h-2"></path><path d="M2 9v2"></path><path d="M22 9v2"></path>
+        </svg>
+    `;
+}
+
+function getBordoKitIcon() {
+    // Símbolo de empilhamento de componentes/kits
+    return `
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="9" width="20" height="13" rx="2" ry="2"></rect>
+            <path d="M12 2v7"></path>
+            <path d="M7 6h10"></path>
+            <path d="M7 14h10"></path>
+            <path d="M7 18h10"></path>
+        </svg>
+    `;
+}
+
+
 // --- NOVA FUNÇÃO PARA AVATAR/IMAGEM DE PERFIL ---
 function getUserAvatar(user) {
     const defaultColor = 'bg-indigo-500';
@@ -1420,41 +1565,106 @@ function getUserAvatar(user) {
 
 
 function renderDashboard() {
-    const radioMap = dbRadios.reduce((acc, r) => { acc[r.id] = r; return acc; }, {});
+    const equipamentoMap = dbEquipamentos.reduce((acc, e) => { acc[e.id] = e; return acc; }, {});
     const activeDbRadios = dbRadios.filter(r => r.ativo !== false);
-
+    const activeDbBordos = dbBordos.filter(b => b.ativo !== false);
+    
+    // --- 1. ESTATÍSTICAS DE RÁDIOS ---
     const radioStats = {
         total: activeDbRadios.length,
         ativos: 0,
         manutencao: 0,
+        sinistro: 0,
         estoque: 0,
     };
     
     activeDbRadios.forEach(r => {
         if (dbRegistros.some(reg => reg.radioId === r.id)) radioStats.ativos++;
         else if (r.status === 'Manutenção') radioStats.manutencao++;
-        else radioStats.estoque++;	
+        else if (r.status === 'Sinistro') radioStats.sinistro++;
+        else radioStats.estoque++; // Disponível ou Outros
     });
     
+    // --- 2. ESTATÍSTICAS E DISPONIBILIDADE DE BORDOS ---
+    const bordosByTipo = TIPOS_BORDO.reduce((acc, tipo) => {
+        acc[tipo] = {
+            total: 0,
+            ativos: 0,
+            disponiveis: 0,
+            manutencao: 0,
+            sinistro: 0,
+        };
+        return acc;
+    }, {});
+    
+    // Contagem de Bordos por Status e Tipo
+    activeDbBordos.forEach(b => {
+        const tipo = b.tipo;
+        if (bordosByTipo[tipo]) {
+            bordosByTipo[tipo].total++;
+            if (b.status === 'Em Uso') bordosByTipo[tipo].ativos++;
+            else if (b.status === 'Manutenção') bordosByTipo[tipo].manutencao++;
+            else if (b.status === 'Sinistro') bordosByTipo[tipo].sinistro++;
+            else if (b.status === 'Disponível') bordosByTipo[tipo].disponiveis++;
+        }
+    });
+
+    // 2a. Cálculo de Kits Ativos (Registros com 3 Bordos)
+    const kitsAtivos = dbRegistros.filter(reg => reg.telaId && reg.magId && reg.chipId).length;
+    
+    // 2b. Cálculo de Kits Disponíveis (Regra: mínimo entre os disponíveis)
+    const dispTela = bordosByTipo['Tela'].disponiveis;
+    const dispMag = bordosByTipo['Mag'].disponiveis;
+    const dispChip = bordosByTipo['Chip'].disponiveis;
+    
+    const kitsDisponiveis = Math.min(dispTela, dispMag, dispChip);
+
+    // 2c. Soma de todos os Bordos Ativos (unidades) e Manutenção/Sinistro (unidades)
+    const totalBordosAtivos = bordosByTipo['Tela'].total + bordosByTipo['Mag'].total + bordosByTipo['Chip'].total;
+    const totalBordosEmUso = bordosByTipo['Tela'].ativos + bordosByTipo['Mag'].ativos + bordosByTipo['Chip'].ativos;
+    const totalBordosManutencao = bordosByTipo['Tela'].manutencao + bordosByTipo['Mag'].manutencao + bordosByTipo['Chip'].manutencao;
+    const totalBordosSinistro = bordosByTipo['Tela'].sinistro + bordosByTipo['Mag'].sinistro + bordosByTipo['Chip'].sinistro;
+
+
+    // --- 3. CONTAGEM POR GRUPO (Tabela inferior) ---
     const groupCounts = {};
     GROUPS.forEach(g => groupCounts[g] = 0);
     
     dbRegistros.forEach(reg => {
-        const equipamento = dbEquipamentos.find(eq => eq.id === reg.equipamentoId && eq.ativo !== false);
-        if (equipamento) {
+        const equipamento = equipamentoMap[reg.equipamentoId];
+        if (equipamento && equipamento.ativo !== false) {
             groupCounts[equipamento.grupo] = (groupCounts[equipamento.grupo] || 0) + 1;
         }
     });
 
+
+    // --- 4. PREPARAÇÃO DOS CARDS ---
     const cardData = [
-        // Usando a nova cor verde e SVGs
-        { title: 'Total de Rádios (Ativos)', value: radioStats.total, iconSvg: getRadioIcon(), color: 'bg-green-main' }, 
+        // RÁDIOS (5 Cards)
+        { title: 'Total Rádios (Ativos)', value: radioStats.total, iconSvg: getRadioIcon(), color: 'bg-green-main' }, 
         { title: 'Rádios Ativos (Em Frota)', value: radioStats.ativos, iconSvg: getActiveRadioIcon(), color: 'bg-indigo-500' },
         { title: 'Rádios em Manutenção', value: radioStats.manutencao, iconSvg: getMaintenanceIcon(), color: 'bg-yellow-600' },
-        { title: 'Rádios Em Estoque (Disponível)', value: radioStats.estoque, iconSvg: getWarehouseIcon(), color: 'bg-blue-600' },
+        { title: 'Rádios em Sinistro', value: radioStats.sinistro, iconSvg: getSinistroIcon(), color: 'bg-red-700' },
+        { title: 'Rádios Em Estoque', value: radioStats.estoque, iconSvg: getWarehouseIcon(), color: 'bg-blue-600' },
+
+        // BORDOS (Kits e Unidades Individuais)
+        { title: 'KITS DE BORDO ATIVOS (Frotas)', value: kitsAtivos, iconSvg: getBordoKitIcon(), color: 'bg-teal-600' },
+        { title: 'KITS DE BORDO DISPONÍVEIS (Mín.)', value: kitsDisponiveis, iconSvg: getBordoKitIcon(), color: 'bg-cyan-600' },
+        
+        { title: 'Total Bordos (Unidades)', value: totalBordosAtivos, iconSvg: getBordoIcon(), color: 'bg-pink-600' },
+        // Adicionando os cards individuais solicitados (Telas, Mags, Chips - Total)
+        { title: 'Telas Cadastradas', value: bordosByTipo['Tela'].total, iconSvg: getBordoIcon(), color: 'bg-blue-500' },
+        { title: 'Mags Cadastrados', value: bordosByTipo['Mag'].total, iconSvg: getBordoIcon(), color: 'bg-yellow-500' },
+        { title: 'Chips Cadastrados', value: bordosByTipo['Chip'].total, iconSvg: getBordoIcon(), color: 'bg-purple-500' },
+
+        { title: 'Bordos em Manutenção (Unidades)', value: totalBordosManutencao, iconSvg: getMaintenanceIcon(), color: 'bg-orange-600' },
+        { title: 'Bordos em Sinistro (Unidades)', value: totalBordosSinistro, iconSvg: getSinistroIcon(), color: 'bg-red-500' },
     ];
     
-    const cardHtml = cardData.map(card => `
+    // Filtra os cartões onde o valor é zero, exceto os cards de Total e Kits (para não sumir a informação central)
+    const finalCardData = cardData.filter(card => card.value > 0 || card.title.startsWith('Total') || card.title.startsWith('KITS') || card.title.includes('Cadastradas'));
+
+    const cardHtml = finalCardData.map(card => `
         <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-xl futuristic-card border border-gray-100 dark:border-gray-700">
             <div class="flex flex-col items-start space-y-3">
                 <div class="p-3 rounded-xl ${card.color} text-white shadow-lg flex items-center justify-center">
@@ -1484,31 +1694,33 @@ function renderDashboard() {
     
     const totalEquipamentos = dbRegistros.length;
 
-    // Removendo a DEMO dos rádio botões do Dashboard, pois eles foram movidos para a navegação
     return `
         <div class="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
-            <h2 class="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-6 text-center">Dashboard de Rádios e Frota</h2>
+            <h2 class="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-6 text-center">Dashboard de Rádios, Bordos e Frota</h2>
 
-            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-6 mb-10">
                 ${cardHtml}
             </div>
-            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-xl p-6 border border-gray-200 dark:border-gray-700 futuristic-card">
-                <h3 class="text-xl font-semibold text-gray-800 dark:text-gray-100 mb-4 flex items-center">
-                    <i class="fas fa-boxes mr-2 text-green-main"></i>	
-                    Equipamentos com Rádio Ativo (Total: ${totalEquipamentos})
-                </h3>
-                <div class="overflow-x-auto">
-                    <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                        <thead class="bg-green-main/10 dark:bg-green-main/30">
-                            <tr>
-                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-600 dark:text-gray-200 uppercase tracking-wider w-3/5">Grupo</th>
-                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-600 dark:text-gray-200 uppercase tracking-wider w-2/5">Rádios Ativos</th>
-                            </tr>
-                        </thead>
-                        <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                            ${tableRows}
-                        </tbody>
-                    </table>
+            
+            <div class="mt-10">
+                <div class="bg-white dark:bg-gray-800 rounded-xl shadow-xl p-6 border border-gray-200 dark:border-gray-700 futuristic-card">
+                    <h3 class="text-xl font-semibold text-gray-800 dark:text-gray-100 mb-4 flex items-center">
+                        <i class="fas fa-boxes mr-2 text-green-main"></i>	
+                        Equipamentos com Rádio Ativo (Total: ${totalEquipamentos})
+                    </h3>
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                            <thead class="bg-green-main/10 dark:bg-green-main/30">
+                                <tr>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-600 dark:text-gray-200 uppercase tracking-wider w-3/5">Grupo</th>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-600 dark:text-gray-200 uppercase tracking-wider w-2/5">Rádios Ativos</th>
+                                </tr>
+                            </thead>
+                            <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                                ${tableRows}
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1516,9 +1728,11 @@ function renderDashboard() {
 }
 
 function renderCadastro() {
+    // 🌟 ATUALIZADO: Adicionando a aba 'bordos'
     const tabs = [
         { id: 'radio', name: 'Rádio' },
         { id: 'equipamento', name: 'Equipamentos' },
+        { id: 'bordos', name: 'Bordos' }, // Nova aba
         { id: 'geral', name: 'Geral' }
     ];
     
@@ -1532,12 +1746,13 @@ function renderCadastro() {
     switch (currentCadastroTab) {
         case 'radio': content = renderCadastroRadio(); break;
         case 'equipamento': content = renderCadastroEquipamento(); break;
+        case 'bordos': content = renderCadastroBordos(); break; // Nova função
         case 'geral': content = renderCadastroGeral(); break;
     }
 
     return `
         <div class="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
-            <h2 class="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-6 text-center">Cadastro de Rádios e Equipamentos</h2>
+            <h2 class="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-6 text-center">Cadastro de Rádios, Equipamentos e Bordos</h2>
             <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700">
                 <div id="cadastro-nav" class="flex border-b border-gray-200 dark:border-gray-700 px-6 pt-2 overflow-x-auto">${tabNav}</div>
                 <div class="p-6">${content}</div>
@@ -1572,11 +1787,15 @@ function renderCadastroRadio() {
     radioPage = Math.min(radioPage, totalRadioPages) || 1;
     const paginatedRadios = filteredRadios.slice((radioPage - 1) * PAGE_SIZE, radioPage * PAGE_SIZE);
 
+    // 🌟 ATUALIZADO: Opções de Status com Sinistro
+    const statusOptions = DISPONIBLE_STATUSES.map(s => `<option value="${s}">${s}</option>`).join('');
+
     const tableRows = paginatedRadios.map(r => {
         const isAtivo = r.ativo !== false;
         const rowClass = isAtivo ? 'hover:bg-gray-50 dark:hover:bg-gray-700/50 border-b dark:border-gray-700' : 'hover:bg-red-50 dark:hover:bg-red-900/10 border-b dark:border-gray-700 opacity-60 italic';
         const statusText = isAtivo ? r.status || 'Disponível' : 'INATIVO';
-        const statusClass = isAtivo ? (r.status === 'Disponível' ? 'text-green-main' : (r.status === 'Manutenção' ? 'text-yellow-600' : 'text-blue-600')) : 'text-red-600';
+        // 🌟 ATUALIZADO: Classe para Sinistro
+        const statusClass = isAtivo ? (r.status === 'Disponível' ? 'text-green-main' : (r.status === 'Manutenção' ? 'text-yellow-600' : (r.status === 'Sinistro' ? 'text-red-700' : 'text-blue-600'))) : 'text-red-600';
         
         // Usa text-gray-700 para manter a cor do texto do item inativo em cinza, 
         // apenas a coluna do status e a linha de fundo muda.
@@ -1636,8 +1855,7 @@ function renderCadastroRadio() {
                     <div>
                         <label for="radio-status" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Status</label>
                         <select id="radio-status" class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-green-main focus:ring-green-main p-2 border bg-white dark:bg-gray-700 dark:text-gray-100">
-                            <option value="Disponível">Disponível</option>
-                            <option value="Manutenção">Manutenção</option>
+                            ${statusOptions}
                             <option value="Em Uso" disabled>Em Uso (automático)</option>
                         </select>
                     </div>
@@ -1683,7 +1901,7 @@ function renderCadastroRadio() {
                             const isAtivo = r.ativo !== false;
                             const rowClass = isAtivo ? 'hover:bg-gray-50 dark:hover:bg-gray-700/50 border-b dark:border-gray-700' : 'hover:bg-red-50 dark:hover:bg-red-900/10 border-b dark:border-gray-700 opacity-60 italic';
                             const statusText = isAtivo ? r.status || 'Disponível' : 'INATIVO';
-                            const statusClass = isAtivo ? (r.status === 'Disponível' ? 'text-green-main' : (r.status === 'Manutenção' ? 'text-yellow-600' : 'text-blue-600')) : 'text-red-600';
+                            const statusClass = isAtivo ? (r.status === 'Disponível' ? 'text-green-main' : (r.status === 'Manutenção' ? 'text-yellow-600' : (r.status === 'Sinistro' ? 'text-red-700' : 'text-blue-600'))) : 'text-red-600';
                             return `
                                 <tr class="${rowClass}">
                                     <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 font-mono">${r.serie}</td>
@@ -1902,9 +2120,220 @@ function renderCadastroEquipamento() {
     `;
 }
 
+// 🌟 NOVO: Função de Renderização da aba Bordos
+function renderCadastroBordos() {
+    // Conta apenas os ativos para o título
+    const activeBordosCount = dbBordos.filter(b => b.ativo !== false).length;
+
+    // Filtra por termo de busca
+    const filteredBordos = dbBordos.filter(b =>	
+        (b.numeroSerie || '').toLowerCase().includes(bordosSearch) ||
+        (b.modelo || '').toLowerCase().includes(bordosSearch) ||
+        (b.tipo || '').toLowerCase().includes(bordosSearch)
+    );
+
+    // FIX para o erro: Uncaught TypeError: Cannot read properties of undefined (reading 'localeCompare')
+    // Garantimos que 'a' e 'b' não são undefined e que as propriedades existem antes de comparar.
+    filteredBordos.sort((a, b) => {
+        // Se a ou b for undefined/null, forçamos para o final da lista (ou mantemos a ordem)
+        if (!a || !a.ativo) return 1;
+        if (!b || !b.ativo) return -1;
+        
+        const aAtivo = a.ativo !== false;
+        const bAtivo = b.ativo !== false;
+
+        if (aAtivo && !bAtivo) return -1; 
+        if (!aAtivo && bAtivo) return 1; 
+        
+        // Ordena por Tipo (se existir)
+        const tipoA = a.tipo || '';
+        const tipoB = b.tipo || '';
+        if (tipoA !== tipoB) return tipoA.localeCompare(tipoB);
+        
+        // Depois por Série (se existir)
+        const serieA = a.numeroSerie || '';
+        const serieB = b.numeroSerie || '';
+        return serieA.localeCompare(serieB);
+    });
+    
+    const totalBordosPages = Math.ceil(filteredBordos.length / PAGE_SIZE);
+    bordosPage = Math.min(bordosPage, totalBordosPages) || 1;
+    const paginatedBordos = filteredBordos.slice((bordosPage - 1) * PAGE_SIZE, bordosPage * PAGE_SIZE);
+
+    // 🌟 ATUALIZADO: Opções de Status com Sinistro
+    const statusOptions = DISPONIBLE_STATUSES.map(s => `<option value="${s}">${s}</option>`).join('');
+
+    const tableRows = paginatedBordos.map(b => {
+        const isAtivo = b.ativo !== false;
+        const rowClass = isAtivo ? 'hover:bg-gray-50 dark:hover:bg-gray-700/50 border-b dark:border-gray-700' : 'hover:bg-red-50 dark:hover:bg-red-900/10 border-b dark:border-gray-700 opacity-60 italic';
+        const statusText = isAtivo ? b.status || 'Disponível' : 'INATIVO';
+        // 🌟 ATUALIZADO: Classe para Sinistro
+        const statusClass = isAtivo ? (b.status === 'Disponível' ? 'text-green-main' : (b.status === 'Manutenção' ? 'text-yellow-600' : (b.status === 'Sinistro' ? 'text-red-700' : 'text-blue-600'))) : 'text-red-600';
+        
+        const tipoClass = b.tipo === 'Tela' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-300' 
+                        : b.tipo === 'Mag' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/50 dark:text-yellow-300' 
+                        : 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/50 dark:text-indigo-300'; // Chip
+        
+        return `
+            <tr class="${rowClass}">
+                <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300">
+                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${tipoClass}">${b.tipo}</span>
+                </td>
+                <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 font-mono">${b.numeroSerie}</td>
+                <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300">${b.modelo}</td>
+                <td class="px-4 py-2 text-sm font-semibold ${statusClass}">${statusText}</td>
+                <td class="px-4 py-2 whitespace-nowrap text-sm font-medium space-x-2">
+                    <button onclick="loadBordoForEdit('${b.id}')" class="text-indigo-600 hover:text-indigo-900 p-1 rounded-full hover:bg-indigo-50 dark:hover:bg-gray-700" title="Editar Bordo">
+                        <i class="fas fa-edit"></i>
+                    </button>
+                    ${(() => {
+                        const actionText = isAtivo ? 'INATIVAR' : 'ATIVAR';
+                        const iconClass = isAtivo ? 'fa-toggle-on text-green-main' : 'fa-toggle-off text-gray-500 dark:text-gray-400';
+                        const btnClass = isAtivo ? 'hover:text-red-900' : 'hover:text-green-main';
+                        const title = isAtivo ? 'Inativar Bordo' : 'Ativar Bordo';
+                        return `
+                        <button onclick="showConfirmModal('Confirmar ${actionText}ÇÃO', 'Deseja realmente ${actionText} o Bordo ${b.numeroSerie} (${b.tipo})?', () => toggleRecordAtivo('bordos', '${b.id}'))" class="${btnClass} p-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700" title="${title}">
+                            <i class="fas ${iconClass} fa-lg"></i>
+                        </button>
+                        `;
+                    })()}
+                </td>
+            </tr>
+        `;
+    }).join('');
+
+    let bordosPaginator = '';
+    if (filteredBordos.length > PAGE_SIZE) {
+        bordosPaginator = '<div class="flex justify-center items-center space-x-2 mt-4">';
+        bordosPaginator += `<button ${bordosPage === 1 ? 'disabled' : ''} onclick="setBordosPage(-1)" class="px-2 py-1 text-sm rounded-md ${bordosPage === 1 ? 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500' : 'bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500 text-gray-700 dark:text-gray-100'}">Anterior</button>`;
+        bordosPaginator += `<span class="text-sm font-medium text-gray-700 dark:text-gray-300">Pág ${bordosPage} de ${totalBordosPages}</span>`;
+        bordosPaginator += `<button ${bordosPage === totalBordosPages ? 'disabled' : ''} onclick="setBordosPage(1)" class="px-2 py-1 text-sm rounded-md ${bordosPage === totalBordosPages ? 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500' : 'bg-gray-300 dark:bg-gray-600 hover:bg-gray-400 dark:hover:bg-gray-500 text-gray-700 dark:text-gray-100'}">Próxima</button>`;
+        bordosPaginator += '</div>';
+    }
+
+    const tipoOptions = TIPOS_BORDO.map(t => `<option value="${t}">${t}</option>`).join('');
+
+    return `
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div class="lg:col-span-1 bg-gray-50 dark:bg-gray-900 p-4 rounded-xl shadow-inner border border-gray-200 dark:border-gray-700">
+                <h4 class="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4">Novo/Editar Item de Bordo</h4>
+                <form id="form-bordos" class="space-y-4">
+                    <input type="hidden" id="bordo-id">
+                    <div>
+                        <label for="bordo-tipo" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Tipo de Bordo <span class="text-red-500">*</span></label>
+                        <select id="bordo-tipo" required
+                            class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-green-main focus:ring-green-main p-2 border bg-white dark:bg-gray-700 dark:text-gray-100">
+                            <option value="">Selecione o Tipo</option>
+                            ${tipoOptions}
+                        </select>
+                    </div>
+                    <div>
+                        <label for="bordo-serie" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Número de Série <span class="text-red-500">*</span></label>
+                        <input type="text" id="bordo-serie" required placeholder="Ex: TEL123456"
+                            class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-green-main focus:ring-green-main p-2 border dark:bg-gray-700 dark:text-gray-100">
+                    </div>
+                    <div>
+                        <label for="bordo-modelo" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Modelo <span class="text-red-500">*</span></label>
+                        <input type="text" id="bordo-modelo" required placeholder="Ex: Vbox 3"
+                            class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-green-main focus:ring-green-main p-2 border dark:bg-gray-700 dark:text-gray-100">
+                    </div>
+                    <div>
+                        <label for="bordo-status" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Status</label>
+                        <select id="bordo-status" class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-green-main focus:ring-green-main p-2 border bg-white dark:bg-gray-700 dark:text-gray-100">
+                            ${statusOptions}
+                            <option value="Em Uso" disabled>Em Uso (automático)</option>
+                        </select>
+                    </div>
+                    <div class="flex space-x-3">
+                        <button type="submit" class="flex-1 w-full flex justify-center py-2 px-3 border border-transparent text-sm font-medium rounded-lg text-white bg-green-main hover:bg-green-700 shadow-md">
+                            <i class="fas fa-save mr-2"></i> Salvar
+                        </button>
+                        <button type="button" onclick="document.getElementById('form-bordos').reset(); document.getElementById('bordo-id').value='';" class="w-1/4 flex justify-center py-2 px-3 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 shadow-sm">
+                            <i class="fas fa-redo"></i>
+                        </button>
+                    </div>
+                </form>
+                <div class="flex justify-between items-center mt-4">
+                    <input type="file" id="bordos-import-file" accept=".csv, .xlsx, .xls" class="hidden" onchange="handleImport('bordos', event)">
+                    <button onclick="document.getElementById('bordos-import-file').click()" class="flex-1 flex justify-center py-2 px-3 border border-transparent text-sm font-medium rounded-lg text-white bg-indigo-500 hover:bg-indigo-600 shadow-md">
+                        <i class="fas fa-upload mr-2"></i> Importar (csv, xlsx)
+                    </button>
+                    <button onclick="showModal('Instruções de Importação - Bordos', window.BORDO_IMPORT_INFO, 'info')" class="ml-2 p-2 text-indigo-500 hover:text-indigo-700 transition-colors rounded-full" title="Instruções de arquivo">
+                        <i class="fas fa-info-circle"></i>
+                    </button>
+                </div>
+            </div>
+
+            <div class="lg:col-span-2">
+                <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center mb-4 gap-2">
+                    <h4 class="text-lg font-semibold text-gray-800 dark:text-gray-100">Itens de Bordo Cadastrados (Ativos: ${activeBordosCount})</h4>
+                    <input type="text" id="bordos-search-input" value="${bordosSearch}"	
+                        oninput="handleSearchInput(this, 'bordosSearch', 1)"	
+                        placeholder="Buscar Tipo, Série ou Modelo..."	
+                        class="rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-green-main focus:ring-green-main p-2 border text-sm w-full sm:w-1/2 dark:bg-gray-700 dark:text-gray-100">
+                </div>
+                <div class="bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-xl shadow-inner overflow-x-auto">
+                    <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                        <thead class="bg-gray-50 dark:bg-gray-900">
+                            <tr>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Tipo</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Série</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Modelo</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Status</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">${paginatedBordos.map(b => {
+                            const isAtivo = b.ativo !== false;
+                            const rowClass = isAtivo ? 'hover:bg-gray-50 dark:hover:bg-gray-700/50 border-b dark:border-gray-700' : 'hover:bg-red-50 dark:hover:bg-red-900/10 border-b dark:border-gray-700 opacity-60 italic';
+                            const statusText = isAtivo ? b.status || 'Disponível' : 'INATIVO';
+                            const statusClass = isAtivo ? (b.status === 'Disponível' ? 'text-green-main' : (b.status === 'Manutenção' ? 'text-yellow-600' : (b.status === 'Sinistro' ? 'text-red-700' : 'text-blue-600'))) : 'text-red-600';
+                            
+                            const tipoClass = b.tipo === 'Tela' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-300' 
+                                            : b.tipo === 'Mag' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/50 dark:text-yellow-300' 
+                                            : 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/50 dark:text-indigo-300'; // Chip
+                            
+                            return `
+                                <tr class="${rowClass}">
+                                    <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300">
+                                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${tipoClass}">${b.tipo}</span>
+                                    </td>
+                                    <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 font-mono">${b.numeroSerie}</td>
+                                    <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300">${b.modelo}</td>
+                                    <td class="px-4 py-2 text-sm font-semibold ${statusClass}">${statusText}</td>
+                                    <td class="px-4 py-2 whitespace-nowrap text-sm font-medium space-x-2">
+                                        <button onclick="loadBordoForEdit('${b.id}')" class="text-indigo-600 hover:text-indigo-900 p-1 rounded-full hover:bg-indigo-50 dark:hover:bg-gray-700" title="Editar Bordo">
+                                            <i class="fas fa-edit"></i>
+                                        </button>
+                                        ${(() => {
+                                            const actionText = isAtivo ? 'INATIVAR' : 'ATIVAR';
+                                            const iconClass = isAtivo ? 'fa-toggle-on text-green-main' : 'fa-toggle-off text-gray-500 dark:text-gray-400';
+                                            const btnClass = isAtivo ? 'hover:text-red-900' : 'hover:text-green-main';
+                                            const title = isAtivo ? 'Inativar Bordo' : 'Ativar Bordo';
+                                            return `
+                                            <button onclick="showConfirmModal('Confirmar ${actionText}ÇÃO', 'Deseja realmente ${actionText} o Bordo ${b.numeroSerie} (${b.tipo})?', () => toggleRecordAtivo('bordos', '${b.id}'))" class="${btnClass} p-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700" title="${title}">
+                                                <i class="fas ${iconClass} fa-lg"></i>
+                                            </button>
+                                            `;
+                                        })()}
+                                    </td>
+                                </tr>
+                            `;
+                        }).join('')}</tbody>
+                    </table>
+                </div>
+                ${bordosPaginator}
+            </div>
+        </div>
+    `;
+}
+
+
 function renderCadastroGeral() {
     const radioMap = dbRadios.reduce((acc, r) => { acc[r.id] = r; return acc; }, {});
     const equipamentoMap = dbEquipamentos.reduce((acc, e) => { acc[e.id] = e; return acc; }, {});
+    // 🌟 NOVO: Mapa de Bordos
+    const bordoMap = dbBordos.reduce((acc, b) => { acc[b.id] = b; return acc; }, {});
     
     const availableRadios = dbRadios.filter(r =>	
         r.ativo !== false &&	
@@ -1916,7 +2345,31 @@ function renderCadastroGeral() {
         e.ativo !== false &&	
         !dbRegistros.some(reg => reg.equipamentoId === e.id)	
     );
+
+    // 🌟 NOVO: Filtra bordos disponíveis
+    const availableBordos = dbBordos.filter(b => 
+        b.ativo !== false &&
+        b.status === 'Disponível' &&
+        !dbRegistros.some(reg => reg.telaId === b.id || reg.magId === b.id || reg.chipId === b.id)
+    );
     
+    // Agrupa bordos por tipo para os selects
+    const bordosPorTipo = availableBordos.reduce((acc, b) => {
+        acc[b.tipo] = acc[b.tipo] || [];
+        acc[b.tipo].push(b);
+        return acc;
+    }, {});
+
+
+    // Funções auxiliares para opções de select de Bordo
+    const getBordoOptions = (tipo) => {
+        const bordos = bordosPorTipo[tipo] || [];
+        // 🌟 NOVO: Exibe o Modelo do Bordo no select
+        return bordos
+            .map(b => `<option value="${b.id}">${b.numeroSerie} (${b.modelo})</option>`)
+            .join('');
+    };
+
     const radioOptions = availableRadios
         // 🌟 NOVO: Exibe o Modelo do Rádio no select
         .map(r => `<option value="${r.id}">${r.serie} (${r.modelo})</option>`)
@@ -1944,17 +2397,26 @@ function renderCadastroGeral() {
     const tableRows = paginatedRegistros.map(reg => {
         const r = radioMap[reg.radioId] || { serie: 'N/A', modelo: 'N/A' };
         const e = equipamentoMap[reg.equipamentoId] || { frota: 'N/A', grupo: 'N/A', subgrupo: 'N/A', codigo: null };
+        const t = bordoMap[reg.telaId] || { numeroSerie: 'N/A' };
+        const m = bordoMap[reg.magId] || { numeroSerie: 'N/A' };
+        const c = bordoMap[reg.chipId] || { numeroSerie: 'N/A' };
+        
         const codigo = e.codigo || reg.codigo || 'N/A'; // Prioriza código do equipamento
+        
+        // 🌟 NOVO: Exibe status dos Bordos vinculados
+        const bordoStatus = (reg.telaId || reg.magId || reg.chipId) 
+            ? `<span class="text-green-600 font-semibold">Bordos OK</span>`
+            : `<span class="text-gray-500 italic">Sem Bordos</span>`;
         
         return `
             <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/50 border-b dark:border-gray-700">
                 <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 font-mono">${codigo}</td>
-                <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300">${r.serie}</td>
                 <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300">${e.frota}</td>
+                <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300">${r.serie}</td>
                 <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hidden sm:table-cell">${e.grupo}</td>
-                <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hidden md:table-cell">${e.subgrupo || 'N/A'}</td>
+                <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hidden md:table-cell">${bordoStatus}</td>
                 <td class="px-4 py-2 whitespace-nowrap text-sm font-medium">
-                    <button onclick="showConfirmModal('Confirmar Desvinculação', 'Deseja realmente desvincular o Rádio ${r.serie} da Frota ${e.frota}?', () => deleteRecord('registros', '${reg.id}'))" class="text-red-600 hover:text-red-900 p-1 rounded-full hover:bg-red-50 dark:hover:bg-gray-700" title="Desvincular Rádio">
+                    <button onclick="showConfirmModal('Confirmar Desvinculação', 'Deseja realmente desvincular o Rádio ${r.serie} e todos os Bordos da Frota ${e.frota}?', () => deleteRecord('registros', '${reg.id}'))" class="text-red-600 hover:text-red-900 p-1 rounded-full hover:bg-red-50 dark:hover:bg-gray-700" title="Desvincular Associação">
                         <i class="fas fa-unlink"></i> Desvincular
                     </button>
                 </td>
@@ -1973,6 +2435,42 @@ function renderCadastroGeral() {
         geralPaginator += '</div>';
     }
 
+    // 🌟 NOVO: Estrutura da aba de Bordos para vinculação
+    const bordoBindingHTML = `
+        <div class="space-y-4">
+            <h5 class="text-md font-semibold text-gray-800 dark:text-gray-100 border-b pb-1 mb-2 flex items-center">
+                <i class="fas fa-cube mr-2 text-indigo-500"></i> Vínculo de Itens de Bordo (Opcional)
+            </h5>
+            <p class="text-xs text-red-500 dark:text-red-400 font-semibold" id="bordo-obrigatoriedade-msg">
+                Se qualquer item de Bordo for selecionado, todos os três (Tela, Mag, Chip) se tornam obrigatórios.
+            </p>
+            
+            <div>
+                <label for="geral-tela-id" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Tela (Display)</label>
+                <select id="geral-tela-id" class="bordo-select mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-green-main focus:ring-green-main p-2 border bg-white dark:bg-gray-700 dark:text-gray-100">
+                    <option value="">Selecione a Tela Disponível (Série/Modelo)</option>
+                    ${getBordoOptions('Tela')}
+                </select>
+            </div>
+
+            <div>
+                <label for="geral-mag-id" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Mag (Módulo de Gerenciamento)</label>
+                <select id="geral-mag-id" class="bordo-select mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-green-main focus:ring-green-main p-2 border bg-white dark:bg-gray-700 dark:text-gray-100">
+                    <option value="">Selecione o Mag Disponível (Série/Modelo)</option>
+                    ${getBordoOptions('Mag')}
+                </select>
+            </div>
+            
+            <div>
+                <label for="geral-chip-id" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Chip (Módulo de Comunicação)</label>
+                <select id="geral-chip-id" class="bordo-select mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-green-main focus:ring-green-main p-2 border bg-white dark:bg-gray-700 dark:text-gray-100">
+                    <option value="">Selecione o Chip Disponível (Série/Modelo)</option>
+                    ${getBordoOptions('Chip')}
+                </select>
+            </div>
+        </div>
+    `;
+
     return `
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div class="lg:col-span-1 bg-gray-50 dark:bg-gray-900 p-4 rounded-xl shadow-inner border border-gray-200 dark:border-gray-700">
@@ -1980,7 +2478,7 @@ function renderCadastroGeral() {
                 <form id="form-geral" class="space-y-4">
                     <div>
                         <label for="geral-radio-id" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Número de Série (Rádio) <span class="text-red-500">*</span></label>
-                        <select id="geral-radio-id" required class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-green-main focus:ring-green-main p-2 border bg-white dark:bg-gray-700 dark:text-gray-100">
+                        <select id="geral-radio-id" required class="tom-select-radio mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-green-main focus:ring-green-main p-2 border bg-white dark:bg-gray-700 dark:text-gray-100">
                             <option value="">Selecione um Rádio Disponível (Série/Modelo)</option>
                             ${radioOptions}
                         </select>
@@ -1988,11 +2486,14 @@ function renderCadastroGeral() {
                     </div>
                     <div>
                         <label for="geral-equipamento-id" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Frota (Equipamento) <span class="text-red-500">*</span></label>
-                        <select type="text" id="geral-equipamento-id" required class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-green-main focus:ring-green-main p-2 border bg-white dark:bg-gray-700 dark:text-gray-100">
+                        <select type="text" id="geral-equipamento-id" required class="tom-select-equipamento mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-green-main focus:ring-green-main p-2 border bg-white dark:bg-gray-700 dark:text-gray-100">
                             <option value="">Selecione a Frota</option>
                             ${frotaOptions}
                         </select>
                     </div>
+                    
+                    ${bordoBindingHTML}
+
                     <div id="equipamento-info" class="space-y-2 text-sm p-3 bg-white dark:bg-gray-800 rounded-lg border dark:border-gray-700">
                         <p class="text-gray-700 dark:text-gray-300"><span class="font-semibold">Grupo:</span> <span id="info-grupo">N/A</span></p>
                         <p class="text-gray-700 dark:text-gray-300"><span class="font-semibold">Subgrupo:</span> <span id="info-subgrupo">N/A</span></p>	
@@ -2017,26 +2518,35 @@ function renderCadastroGeral() {
                         <thead class="bg-gray-50 dark:bg-gray-900">
                             <tr>
                                 <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Código</th>
-                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Série Rádio</th>
                                 <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Frota</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Série Rádio</th>
                                 <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase hidden sm:table-cell">Grupo</th>
-                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase hidden md:table-cell">Subgrupo</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase hidden md:table-cell">Bordos</th>
                                 <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Ações</th>
                             </tr>
                         </thead>
                         <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">${paginatedRegistros.map(reg => {
                             const r = radioMap[reg.radioId] || { serie: 'N/A', modelo: 'N/A' };
                             const e = equipamentoMap[reg.equipamentoId] || { frota: 'N/A', grupo: 'N/A', subgrupo: 'N/A', codigo: null };
+                            const t = bordoMap[reg.telaId] || { numeroSerie: 'N/A' };
+                            const m = bordoMap[reg.magId] || { numeroSerie: 'N/A' };
+                            const c = bordoMap[reg.chipId] || { numeroSerie: 'N/A' };
+                            
                             const codigo = e.codigo || reg.codigo || 'N/A'; // Prioriza código do equipamento
+                            
+                            const bordoStatus = (reg.telaId || reg.magId || reg.chipId) 
+                                ? `<span class="text-green-600 font-semibold">Bordos OK</span>`
+                                : `<span class="text-gray-500 italic">Sem Bordos</span>`;
+
                             return `
                                 <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/50 border-b dark:border-gray-700">
                                     <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 font-mono">${codigo}</td>
-                                    <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300">${r.serie}</td>
                                     <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300">${e.frota}</td>
+                                    <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300">${r.serie}</td>
                                     <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hidden sm:table-cell">${e.grupo}</td>
-                                    <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hidden md:table-cell">${e.subgrupo || 'N/A'}</td>
+                                    <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hidden md:table-cell">${bordoStatus}</td>
                                     <td class="px-4 py-2 whitespace-nowrap text-sm font-medium">
-                                        <button onclick="showConfirmModal('Confirmar Desvinculação', 'Deseja realmente desvincular o Rádio ${r.serie} da Frota ${e.frota}?', () => deleteRecord('registros', '${reg.id}'))" class="text-red-600 hover:text-red-900 p-1 rounded-full hover:bg-red-50 dark:hover:bg-gray-700" title="Desvincular Rádio">
+                                        <button onclick="showConfirmModal('Confirmar Desvinculação', 'Deseja realmente desvincular o Rádio ${r.serie} e todos os Bordos da Frota ${e.frota}?', () => deleteRecord('registros', '${reg.id}'))" class="text-red-600 hover:text-red-900 p-1 rounded-full hover:bg-red-50 dark:hover:bg-gray-700" title="Desvincular Associação">
                                             <i class="fas fa-unlink"></i> Desvincular
                                         </button>
                                     </td>
@@ -2054,11 +2564,23 @@ function renderCadastroGeral() {
 function renderPesquisa() {
     const radioMap = dbRadios.reduce((acc, r) => { acc[r.id] = r; return acc; }, {});
     const equipamentoMap = dbEquipamentos.reduce((acc, e) => { acc[e.id] = e; return acc; }, {});
+    // 🌟 NOVO: Mapa de Bordos
+    const bordoMap = dbBordos.reduce((acc, b) => { acc[b.id] = b; return acc; }, {});
     
     // 1. Processa e filtra todos os registros ativos (junção de dados)
     const allRecords = dbRegistros.map(reg => {
         const r = dbRadios.find(r => r.id === reg.radioId) || {};
         const e = dbEquipamentos.find(e => e.id === reg.equipamentoId) || {};
+        const t = bordoMap[reg.telaId] || { tipo: 'Tela', numeroSerie: 'N/A' };
+        const m = bordoMap[reg.magId] || { tipo: 'Mag', numeroSerie: 'N/A' };
+        const c = bordoMap[reg.chipId] || { tipo: 'Chip', numeroSerie: 'N/A' };
+        
+        // 🌟 NOVO: Informações de Bordos para o registro
+        const bordos = [t, m, c];
+        const bordosText = bordos.map(b => b.numeroSerie).join(' / ');
+        const bordosDetailed = bordos.map(b => `${b.tipo}: ${b.numeroSerie}`).join(', ');
+        const temBordos = bordos.some(b => b.numeroSerie !== 'N/A');
+
         return {
             id: reg.id,	
             codigo: e.codigo || reg.codigo,
@@ -2069,7 +2591,9 @@ function renderPesquisa() {
             grupo: e.grupo || 'N/A', 
             subgrupo: e.subgrupo || 'N/A',
             gestor: e.gestor || 'N/A', 
-            createdAt: reg.createdAt
+            createdAt: reg.createdAt,
+            // 🌟 NOVO: Adicionando dados de bordos
+            bordosText, bordosDetailed, temBordos
         };
     });
     
@@ -2085,7 +2609,9 @@ function renderPesquisa() {
             (r.grupo || '').toLowerCase().includes(searchTerm) ||
             (r.subgrupo || '').toLowerCase().includes(searchTerm) ||
             (r.gestor || '').toLowerCase().includes(searchTerm) ||
-            (r.modeloEquipamento || '').toLowerCase().includes(searchTerm)
+            (r.modeloEquipamento || '').toLowerCase().includes(searchTerm) ||
+            // 🌟 NOVO: Busca por Série de Bordo
+            (r.bordosDetailed || '').toLowerCase().includes(searchTerm)
         );
     }
     
@@ -2101,10 +2627,9 @@ function renderPesquisa() {
             <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/50 border-b dark:border-gray-700">
                 <td class="px-3 py-2 text-sm font-semibold text-gray-900 dark:text-gray-100 font-mono">${r.codigo}</td>
                 <td class="px-3 py-2 text-sm text-gray-700 dark:text-gray-300">${r.frota}</td>
-                <td class="px-3 py-2 text-sm text-gray-700 dark:text-gray-300">${r.grupo}</td>
+                <td class="px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hidden sm:table-cell">${r.grupo}</td>
                 <td class="px-3 py-2 text-sm text-gray-700 dark:text-gray-300">${r.serie}</td>
-                <td class="px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hidden sm:table-cell">${r.modeloRadio}</td>
-                <td class="px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hidden md:table-cell">${r.subgrupo}</td>
+                <td class="px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hidden md:table-cell" title="${r.bordosDetailed}">${r.temBordos ? `<i class="fas fa-check-circle text-green-500 mr-1"></i> ${r.bordosText}` : 'N/A'}</td>
                 <td class="px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hidden lg:table-cell">${r.gestor}</td>
             </tr>
         `).join('');
@@ -2112,7 +2637,7 @@ function renderPesquisa() {
         // 🌟 CORREÇÃO: Mensagem em Português
         tableRows = `
             <tr>
-                <td colspan="7" class="px-4 py-4 text-center text-gray-500 dark:text-gray-400 italic">
+                <td colspan="6" class="px-4 py-4 text-center text-gray-500 dark:text-gray-400 italic">
                     Nenhum registro ativo encontrado.
                 </td>
             </tr>
@@ -2134,7 +2659,7 @@ function renderPesquisa() {
             <h2 class="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-6 text-center">Pesquisa de Registros Ativos</h2>
             <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
                 <div class="mb-4 flex space-x-2">
-                    <input type="text" id="search-term" placeholder="Buscar por Código, Série, Frota, Subgrupo..."	
+                    <input type="text" id="search-term" placeholder="Buscar por Código, Série, Frota, Bordo..."	
                         value="${searchTermPesquisa}"	
                         oninput="handleSearchInput(this, 'searchTermPesquisa', 1)"
                         class="flex-1 rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-green-main focus:ring-green-main p-2 border dark:bg-gray-700 dark:text-gray-100"
@@ -2151,10 +2676,9 @@ function renderPesquisa() {
                             <tr>
                                 <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Código</th>
                                 <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Frota</th>
-                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Grupo</th>
-                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Série</th>
-                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase hidden sm:table-cell">Modelo Rádio</th>
-                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase hidden md:table-cell">Subgrupo</th>
+                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase hidden sm:table-cell">Grupo</th>
+                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Série Rádio</th>
+                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase hidden md:table-cell">Séries Bordos</th>
                                 <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase hidden lg:table-cell">Gestor</th>
                             </tr>
                         </thead>
@@ -2488,6 +3012,8 @@ function handleSearchInput(inputElement, stateVariable, pageToReset = null) {
 
     if (stateVariable === 'radioSearch') radioSearch = value.toLowerCase();
     else if (stateVariable === 'equipamentoSearch') equipamentoSearch = value.toLowerCase();
+    // 🌟 NOVO: Salva o termo de busca da aba Bordos
+    else if (stateVariable === 'bordosSearch') bordosSearch = value.toLowerCase();
     else if (stateVariable === 'geralSearch') geralSearch = value.toLowerCase();
     // 🌟 NOVO: Salva o termo de busca da pesquisa
     else if (stateVariable === 'searchTermPesquisa') searchTermPesquisa = value.toLowerCase();
@@ -2496,6 +3022,8 @@ function handleSearchInput(inputElement, stateVariable, pageToReset = null) {
     if (pageToReset) {
         if (stateVariable === 'radioSearch') radioPage = 1;
         else if (stateVariable === 'equipamentoSearch') equipamentoPage = 1;
+        // 🌟 NOVO: Reseta a página de Bordos
+        else if (stateVariable === 'bordosSearch') bordosPage = 1;
         else if (stateVariable === 'geralSearch') geralPage = 1;
         // 🌟 NOVO: Reseta a página de pesquisa
         else if (stateVariable === 'searchTermPesquisa') pesquisaPage = 1;
@@ -2640,6 +3168,8 @@ function attachCadastroEvents() {
     
     if (currentCadastroTab === 'radio') attachCadastroRadioEvents();
     else if (currentCadastroTab === 'equipamento') attachCadastroEquipamentoEvents();
+    // 🌟 NOVO: Anexa eventos da aba Bordos
+    else if (currentCadastroTab === 'bordos') attachCadastroBordosEvents();
     else if (currentCadastroTab === 'geral') attachCadastroGeralEvents();
 }
 
@@ -2658,8 +3188,10 @@ function attachCadastroRadioEvents() {
                 return;
             }
             
-            if ((!id || (id && dbRadios.find(r=>r.id===id)?.serie !== serie)) && dbRadios.some(r => r.serie === serie)) {
-                showModal('Erro', 'Este Número de Série já está cadastrado.', 'error');
+            // Checagem de duplicidade: deve ser única entre todos os rádios (mesmo ativos ou inativos)
+            const isDuplicateSerie = dbRadios.some(r => r.serie === serie && r.id !== id);
+            if (isDuplicateSerie) {
+                showModal('Erro', `Este Número de Série (${serie}) já está cadastrado.`, 'error');
                 return;
             }
 
@@ -2669,7 +3201,7 @@ function attachCadastroRadioEvents() {
                 const existingRadio = dbRadios.find(r => r.id === id);
                 if (existingRadio && existingRadio.status === 'Em Uso' && status !== 'Em Uso') {
                     record.status = 'Em Uso';	
-                    showModal('Aviso', 'O status "Em Uso" só pode ser alterado na aba "Geral".', 'warning');
+                    showModal('Aviso', 'O status "Em Uso" só pode ser alterado na aba "Geral" (pela desvinculação).', 'warning');
                 }
             }
 
@@ -2723,8 +3255,10 @@ function attachCadastroEquipamentoEvents() {
                 return;
             }
             
-            if ((!id || (id && dbEquipamentos.find(eq=>eq.id===id)?.frota !== frota)) && dbEquipamentos.some(eq => eq.frota === frota)) {
-                showModal('Erro', 'Esta Frota já está cadastrada.', 'error');
+            // Checagem de duplicidade: deve ser única entre todas as frotas
+            const isDuplicateFrota = dbEquipamentos.some(eq => eq.frota === frota && eq.id !== id);
+            if (isDuplicateFrota) {
+                showModal('Erro', `Esta Frota (${frota}) já está cadastrada.`, 'error');
                 return;
             }
 
@@ -2753,32 +3287,113 @@ function loadEquipamentoForEdit(id) {
     }
 }
 
+// 🌟 NOVO: Funções de CRUD da aba Bordos
+function attachCadastroBordosEvents() {
+    const form = document.getElementById('form-bordos');
+    if (form) {
+        form.onsubmit = async (e) => {
+            e.preventDefault();
+            const id = document.getElementById('bordo-id').value;
+            const tipo = document.getElementById('bordo-tipo').value;
+            const numeroSerie = document.getElementById('bordo-serie').value.trim();
+            const modelo = document.getElementById('bordo-modelo').value.trim();
+            const status = document.getElementById('bordo-status').value; // 🌟 NOVO: Captura o status
+            
+            if (!tipo || !numeroSerie || !modelo) {
+                showModal('Erro', 'Todos os campos são obrigatórios.', 'error');
+                return;
+            }
+            
+            // Checagem de duplicidade: deve ser única para a combinação TIPO + NÚMERO DE SÉRIE
+            const isDuplicate = dbBordos.some(b => 
+                b.tipo === tipo && 
+                b.numeroSerie === numeroSerie && 
+                b.id !== id
+            );
+            
+            if (isDuplicate) {
+                showModal('Erro', `Este Bordo (${tipo}) com Número de Série (${numeroSerie}) já está cadastrado. A combinação Tipo/Série deve ser única.`, 'error');
+                return;
+            }
+
+            const record = { id, tipo, numeroSerie, modelo, status }; // 🌟 NOVO: Salva o status
+            await saveRecord('bordos', record);	
+            
+            form.reset();
+            document.getElementById('bordo-id').value = '';
+            document.getElementById('bordo-tipo').disabled = false; // Desbloqueia o tipo após reset
+        };
+    }
+}
+
+function loadBordoForEdit(id) {
+    const bordo = dbBordos.find(b => b.id === id);
+    if (bordo) {
+        document.getElementById('bordo-id').value = bordo.id;
+        document.getElementById('bordo-tipo').value = bordo.tipo;
+        document.getElementById('bordo-serie').value = bordo.numeroSerie;
+        document.getElementById('bordo-modelo').value = bordo.modelo;
+        document.getElementById('bordo-status').value = bordo.status || 'Disponível'; // 🌟 NOVO: Carrega o status
+        
+        // Bloqueia a edição do tipo se o bordo já foi cadastrado para evitar duplicidades críticas
+        const tipoSelect = document.getElementById('bordo-tipo');
+        const statusSelect = document.getElementById('bordo-status');
+        const emUsoOption = statusSelect.querySelector('option[value="Em Uso"]');
+
+        if (id) {
+            tipoSelect.disabled = true;
+            if (emUsoOption) {
+                // Habilita/Desabilita "Em Uso" para visualização, mas a edição só pode ser feita na Geral
+                emUsoOption.disabled = (bordo.status !== 'Em Uso');
+            }
+            showModal('Edição', `Carregando Bordo ${bordo.numeroSerie} (${bordo.tipo}) para edição. O Tipo foi bloqueado para manter a integridade.`, 'info');
+        } else {
+             tipoSelect.disabled = false;
+             if (emUsoOption) emUsoOption.disabled = true;
+             showModal('Edição', `Carregando Bordo ${bordo.numeroSerie} (${bordo.tipo}) para edição.`, 'info');
+        }
+        
+        window.scrollTo(0, 0);
+    } else {
+        showModal('Erro', 'Bordo não encontrado.', 'error');
+    }
+}
+
+
 function attachCadastroGeralEvents() {
     const radioSelect = document.getElementById('geral-radio-id');
     const equipamentoSelect = document.getElementById('geral-equipamento-id');
+    const telaSelect = document.getElementById('geral-tela-id');
+    const magSelect = document.getElementById('geral-mag-id');
+    const chipSelect = document.getElementById('geral-chip-id');
+
+    // Elementos de bordo para iteração
+    const bordoSelects = [telaSelect, magSelect, chipSelect];
+    const bordoIds = ['geral-tela-id', 'geral-mag-id', 'geral-chip-id'];
     
     // 🌟 INICIALIZAÇÃO DO TOM SELECT 🌟
     if (typeof TomSelect !== 'undefined') {
-        // Garante que o TomSelect não seja inicializado mais de uma vez (caso a função seja chamada múltiplas vezes)
-        if (radioSelect && !radioSelect.TomSelect) {
-            new TomSelect(radioSelect, {
-                plugins: ['dropdown_input'],
-                maxItems: 1,
-                allowEmptyOption: true,
-                placeholder: 'Digite para buscar o Rádio...',
-            });
-        }
-        if (equipamentoSelect && !equipamentoSelect.TomSelect) {
-            new TomSelect(equipamentoSelect, {
-                plugins: ['dropdown_input'],
-                maxItems: 1,
-                allowEmptyOption: true,
-                placeholder: 'Digite para buscar a Frota...',
-            });
-        }
+        // Inicializa o TomSelect apenas se ainda não estiver inicializado
+        const initTomSelect = (el, placeholder) => {
+            if (el && !el.TomSelect) {
+                new TomSelect(el, {
+                    plugins: ['dropdown_input'],
+                    maxItems: 1,
+                    allowEmptyOption: true,
+                    placeholder: placeholder,
+                });
+            }
+        };
+
+        initTomSelect(radioSelect, 'Digite para buscar o Rádio...');
+        initTomSelect(equipamentoSelect, 'Digite para buscar a Frota...');
+        initTomSelect(telaSelect, 'Selecione a Tela Disponível...');
+        initTomSelect(magSelect, 'Selecione o Mag Disponível...');
+        initTomSelect(chipSelect, 'Selecione o Chip Disponível...');
     }
     // ------------------------------------
 
+    // Lógica para atualizar info do rádio
     if (radioSelect) {
         radioSelect.onchange = () => {
             const radioId = radioSelect.value;
@@ -2792,18 +3407,19 @@ function attachCadastroGeralEvents() {
                 }
             }
         };
-        // O dispatchEvent é importante para atualizar a info do modelo na primeira renderização
         radioSelect.dispatchEvent(new Event('change'));
     }
     
+    // Lógica para atualizar info do equipamento
     if (equipamentoSelect) {
         equipamentoSelect.onchange = () => {
             const equipamentoId = equipamentoSelect.value;
             const infoGrupo = document.getElementById('info-grupo');
             const infoSubgrupo = document.getElementById('info-subgrupo');
             const infoGestor = document.getElementById('info-gestor');
+            const infoCodigo = document.getElementById('info-codigo');
             
-            if(infoGrupo && infoSubgrupo && infoGestor){	
+            if(infoGrupo && infoSubgrupo && infoGestor && infoCodigo){	
                 if (equipamentoId) {
                     const equipamento = dbEquipamentos.find(e => e.id === equipamentoId);
                     if (equipamento) {
@@ -2811,28 +3427,51 @@ function attachCadastroGeralEvents() {
                         infoSubgrupo.textContent = equipamento.subgrupo;
                         infoGestor.textContent = equipamento.gestor;
 
-                        // [NOVO] Mostra o código do equipamento, se existir
-                        const infoCodigo = document.getElementById('info-codigo');
-                        if (infoCodigo) {
-                            if (equipamento.codigo) {
-                                infoCodigo.innerHTML = `<span class="font-bold text-green-main">${equipamento.codigo}</span> (Código já vinculado)`;
-                            } else {
-                                infoCodigo.innerHTML = `<span class="font-semibold text-yellow-600">Nenhum</span> (Será gerado ao salvar)`;
-                            }
+                        if (equipamento.codigo) {
+                            infoCodigo.innerHTML = `<span class="font-bold text-green-main">${equipamento.codigo}</span> (Código já vinculado)`;
+                        } else {
+                            infoCodigo.innerHTML = `<span class="font-semibold text-yellow-600">Nenhum</span> (Será gerado ao salvar)`;
                         }
                     } else {
                         infoGrupo.textContent = 'N/A'; infoSubgrupo.textContent = 'N/A'; infoGestor.textContent = 'N/A';
-                        document.getElementById('info-codigo').textContent = 'N/A';
+                        infoCodigo.textContent = 'N/A';
                     }
                 } else {
                     infoGrupo.textContent = 'N/A'; infoSubgrupo.textContent = 'N/A'; infoGestor.textContent = 'N/A';
-                    document.getElementById('info-codigo').textContent = 'N/A';
+                    infoCodigo.textContent = 'N/A';
                 }
             }
         };
-        // O dispatchEvent é importante para atualizar a info do equipamento na primeira renderização
         equipamentoSelect.dispatchEvent(new Event('change'));
     }
+
+    // 🌟 NOVO: Lógica de obrigatoriedade dos Bordos
+    const checkBordoObligatoriedade = () => {
+        const selectedBordos = bordoSelects.filter(s => s.value).length;
+        const msgEl = document.getElementById('bordo-obrigatoriedade-msg');
+        
+        if (selectedBordos > 0) {
+            msgEl.classList.remove('text-red-500');
+            msgEl.classList.add('text-green-500');
+            msgEl.innerHTML = `
+                <i class="fas fa-exclamation-triangle mr-1"></i> 
+                Vínculo de Bordos Ativado: Todos os três (Tela, Mag, Chip) são **OBRIGATÓRIOS** para salvar.
+            `;
+        } else {
+            msgEl.classList.remove('text-green-500');
+            msgEl.classList.add('text-red-500');
+            msgEl.innerHTML = `
+                Se qualquer item de Bordo for selecionado, todos os três (Tela, Mag, Chip) se tornam obrigatórios para salvar o vínculo.
+            `;
+        }
+    };
+    
+    bordoSelects.forEach(s => {
+        if (s) {
+            s.onchange = checkBordoObligatoriedade;
+            s.dispatchEvent(new Event('change'));
+        }
+    });
 
     const form = document.getElementById('form-geral');
     if (form) {
@@ -2840,6 +3479,11 @@ function attachCadastroGeralEvents() {
             e.preventDefault();
             const radioId = radioSelect.value;
             const equipamentoId = equipamentoSelect.value;
+            const telaId = telaSelect.value || null;
+            const magId = magSelect.value || null;
+            const chipId = chipSelect.value || null;
+            
+            const bordosSelecionados = [telaId, magId, chipId].filter(id => id).length;
             
             if (!radioId || !equipamentoId) {
                 showModal('Erro', 'Selecione um Rádio e uma Frota válidos.', 'error');
@@ -2854,8 +3498,24 @@ function attachCadastroGeralEvents() {
                 showModal('Erro', 'Este Rádio já está em uso.', 'error');
                 return;
             }
+            
+            // 🌟 NOVO: Regra de obrigatoriedade de Bordos
+            if (bordosSelecionados > 0 && bordosSelecionados < 3) {
+                 showModal('Erro de Bordo', 'Vínculo de Bordos Ativado: Se você selecionou um item de Bordo, deve selecionar todos os três (Tela, Mag e Chip).', 'error');
+                 return;
+            }
 
-            // [NOVA LÓGICA DE CÓDIGO]
+            // Checagem de Bordos (se 3 selecionados, checa se não estão em uso)
+            if (bordosSelecionados === 3) {
+                 const bordosEmUso = dbRegistros.some(reg => reg.telaId === telaId || reg.magId === magId || reg.chipId === chipId);
+                 if (bordosEmUso) {
+                     showModal('Erro de Bordo', 'Um ou mais Bordos selecionados já estão em uso. Por favor, desvincule-os primeiro.', 'error');
+                     return;
+                 }
+            }
+
+
+            // [LÓGICA DE CÓDIGO]
             const equipamentoRef = doc(db, `artifacts/${appId}/public/data/equipamentos`, equipamentoId);
             const equipamentoSnap = await getDoc(equipamentoRef);
             
@@ -2870,11 +3530,10 @@ function attachCadastroGeralEvents() {
             // Se o equipamento não tiver um código, gera um novo e salva nele
             if (!codigoDoEquipamento) {
                 codigoDoEquipamento = generateCode(equipamento.grupo);	
-                if (!codigoDoEquipamento) return; // Erro já tratado em generateCode
+                if (!codigoDoEquipamento) return; 
 
                 try {
                     await updateDoc(equipamentoRef, { codigo: codigoDoEquipamento });
-                    console.log(`Código ${codigoDoEquipamento} salvo no equipamento ${equipamentoId}`);
                 } catch (e) {
                     showModal('Erro', 'Não foi possível salvar o novo código no equipamento.', 'error');
                     return;
@@ -2884,24 +3543,52 @@ function attachCadastroGeralEvents() {
             const record = {
                 radioId,
                 equipamentoId,
-                codigo: codigoDoEquipamento, // Salva o código (novo ou existente) na associação
+                codigo: codigoDoEquipamento, 
+                // 🌟 NOVO: Adiciona Bordos ao registro
+                telaId: telaId, 
+                magId: magId,
+                chipId: chipId,
                 createdAt: new Date().toISOString()
             };
             
             try {
-                // Salva o registro de associação
-                await saveRecord('registros', record);	
+                const batch = writeBatch(db);
+                // 1. Salva o registro de associação
+                const newRegRef = doc(collection(db, `artifacts/${appId}/public/data/registros`));
+                batch.set(newRegRef, record);
                 
-                // Atualiza o status do rádio
-                // [CORREÇÃO] Usa appId hardcoded
+                // 2. Atualiza o status do Rádio
                 const radioRef = doc(db, `artifacts/${appId}/public/data/radios`, radioId);
-                await updateDoc(radioRef, { status: 'Em Uso' });
+                batch.update(radioRef, { status: 'Em Uso' });
+
+                // 3. 🌟 NOVO: Atualiza o status dos Bordos para 'Em Uso'
+                if (telaId) {
+                    const telaRef = doc(db, `artifacts/${appId}/public/data/bordos`, telaId);
+                    batch.update(telaRef, { status: 'Em Uso' });
+                }
+                if (magId) {
+                    const magRef = doc(db, `artifacts/${appId}/public/data/bordos`, magId);
+                    batch.update(magRef, { status: 'Em Uso' });
+                }
+                if (chipId) {
+                    const chipRef = doc(db, `artifacts/${appId}/public/data/bordos`, chipId);
+                    batch.update(chipRef, { status: 'Em Uso' });
+                }
+
+                await batch.commit();
 
                 showModal('Sucesso!', `Equipamento cadastrado! Código: ${codigoDoEquipamento}`, 'success');
                 
+                // Limpa e atualiza os selects
                 form.reset();
-                if(radioSelect) radioSelect.dispatchEvent(new Event('change'));
-                if(equipamentoSelect) equipamentoSelect.dispatchEvent(new Event('change'));
+                if(radioSelect && radioSelect.TomSelect) radioSelect.TomSelect.clear();
+                if(equipamentoSelect && equipamentoSelect.TomSelect) equipamentoSelect.TomSelect.clear();
+                if(telaSelect && telaSelect.TomSelect) telaSelect.TomSelect.clear();
+                if(magSelect && magSelect.TomSelect) magSelect.TomSelect.clear();
+                if(chipSelect && chipSelect.TomSelect) chipSelect.TomSelect.clear();
+                
+                // Isso forçará a renderização e o re-anexo de eventos com a nova lista de Bordos/Rádios
+                renderApp();
             
             } catch (error) {
                 showModal('Erro', 'Ocorreu um erro ao salvar a associação.', 'error');
@@ -3196,7 +3883,7 @@ function setupAuthListener() {
                 isAuthReady = true;
                 isLoggingIn = false;
                 detachFirestoreListeners();	
-                dbRadios = []; dbEquipamentos = []; dbRegistros = [];
+                dbRadios = []; dbEquipamentos = []; dbBordos = []; dbRegistros = []; // 🌟 ATUALIZADO: Limpa Bordos
                 // Volta para a tela de login principal por padrão
                 updateState('loginView', 'login'); 
                 renderApp();	
@@ -3228,6 +3915,13 @@ function initApp() {
 
 function renderApp() {
     const root = document.getElementById('app');
+    
+    // CORREÇÃO CRÍTICA DE SEGURANÇA: Se o elemento raiz não existe, saia imediatamente.
+   if (!root) {
+        console.warn("Elemento raiz '#app' não encontrado. O renderApp será interrompido.");
+        return; 
+    }
+    
     let contentHTML = '';
 
     if (isLoggingIn) {
@@ -3508,12 +4202,20 @@ function hideDuplicityModal() {
 
 // Wrapper para exclusão que usa o modal de confirmação global
 function deleteDuplicityWrapper(collection, id, value) {
-    const type = collection === 'radios' ? 'Rádio (Série)' : 'Equipamento (Frota)';
+    let type;
+    if (collection === 'radios') type = 'Rádio (Série)';
+    else if (collection === 'equipamentos') type = 'Equipamento (Frota)';
+    else if (collection === 'bordos') type = 'Bordo (Tipo/Série)';
+    else type = 'Registro';
+
     showConfirmModal('Confirmar Exclusão de Duplicidade', 
         `Deseja **EXCLUIR PERMANENTEMENTE** o registro duplicado de ${type}: <b>${value}</b>?`, 
         () => deleteDuplicity(collection, id)
     );
 }
+
+// Localize esta função no final do app.main.js
+// app.main.js - Função processImportedData (CORRIGIDA)
 
 async function processImportedData(collectionName, data) {
     if (!db || !appId) {
@@ -3522,29 +4224,39 @@ async function processImportedData(collectionName, data) {
     }
 
     const newRecords = [];
-    let currentDb = collectionName === 'radios' ? dbRadios : dbEquipamentos;
+    let currentDb = collectionName === 'radios' ? dbRadios : (collectionName === 'equipamentos' ? dbEquipamentos : dbBordos);
     let ignoredCount = 0;
+    
+    // NOVO: Lista para checar duplicidades DENTRO do próprio arquivo de importação
+    const keysBeingImported = new Set(); 
 
     for (const item of data) {
         let record = { createdAt: new Date().toISOString(), ativo: true };
-        let isDuplicate = false;
-        
+        let keyToValidate = ''; // Chave única: Número de Série ou Frota ou Tipo+Série
+
         if (collectionName === 'radios') {
-            const serie = item['Numero de Serie'] || item['Numero deSerie'] || item['serie'];
-            const modelo = item['Modelo'] || item['Modelo de Radio'] || item['modelo'];
+            const serie = item['Numero de Serie'] || item['NumeroSerie'] || item['serie'];
+            const modelo = item['Modelo'] || item['Modelo de Rádio'] || item['modelo'];
             
             if (!serie || !modelo) continue;
             
             record.serie = String(serie).trim();
             record.modelo = String(modelo).trim();
             record.status = 'Disponível';	
-
-            // [CORREÇÃO] Checagem de duplicidade no cache local
-            if (currentDb.some(r => r.serie === record.serie)) {
-                console.warn(`Rádio duplicado (cache local): ${record.serie}. Ignorando.`);
-                isDuplicate = true;
-            }
+            keyToValidate = record.serie; // Duplicidade por Série
             
+            // 1. Checagem de duplicidade no banco de dados
+            const isDbDuplicate = currentDb.some(r => r.serie === keyToValidate);
+            
+            // 2. Checagem de duplicidade DENTRO do arquivo
+            const isFileDuplicate = keysBeingImported.has(keyToValidate);
+
+            if (isDbDuplicate || isFileDuplicate) {
+                 ignoredCount++;
+                 continue;
+            }
+            keysBeingImported.add(keyToValidate);
+
         } else if (collectionName === 'equipamentos') {
             const frota = item['Frota'];
             const grupo = item['Grupo'];
@@ -3552,8 +4264,9 @@ async function processImportedData(collectionName, data) {
             const subgrupo = item['Subgrupo'] || item['Descricao do Equipamento'] || item['Descricao Equipamento'];
             const gestor = item['Gestor'] || 'Sem Gestor';
             
+            // Validação de campos obrigatórios e grupo
             if (!frota || !grupo || !modeloEq || !subgrupo || !GROUPS.includes(String(grupo).trim())) {
-                console.warn('Registro de equipamento inválido:', item);
+                console.warn('Registro de equipamento inválido ou incompleto:', item);
                 continue;
             }
 
@@ -3562,19 +4275,54 @@ async function processImportedData(collectionName, data) {
             record.modelo = String(modeloEq).trim();
             record.subgrupo = String(subgrupo).trim();	
             record.gestor = String(gestor).trim();
+            keyToValidate = record.frota; // Duplicidade por Frota
             
-            // [CORREÇÃO] Checagem de duplicidade no cache local
-            if (currentDb.some(r => r.frota === record.frota)) {
-                console.warn(`Equipamento duplicado (cache local): ${record.frota}. Ignorando.`);
-                isDuplicate = true;
-            }
-        }
+             // 1. Checagem de duplicidade no banco de dados
+            const isDbDuplicate = currentDb.some(e => e.frota === keyToValidate);
 
-        if (isDuplicate) {
-            ignoredCount++;
+            // 2. Checagem de duplicidade DENTRO do arquivo
+            const isFileDuplicate = keysBeingImported.has(keyToValidate);
+
+            if (isDbDuplicate || isFileDuplicate) {
+                 ignoredCount++;
+                 continue;
+            }
+            keysBeingImported.add(keyToValidate);
+
+        } else if (collectionName === 'bordos') {
+            const tipo = item['Tipo'] || item['tipo'];
+            const numeroSerie = item['Numero de Serie'] || item['NumeroSerie'] || item['numeroSerie'];
+            const modelo = item['Modelo'] || item['modelo'];
+
+            if (!tipo || !numeroSerie || !modelo || !TIPOS_BORDO.includes(String(tipo).trim())) continue;
+
+            record.tipo = String(tipo).trim();
+            record.numeroSerie = String(numeroSerie).trim();
+            record.modelo = String(modelo).trim();
+            record.status = 'Disponível';
+            
+            keyToValidate = `${record.tipo}-${record.numeroSerie}`; // Duplicidade por Tipo+Série
+
+            // 1. Checagem de duplicidade no banco de dados
+            const isDbDuplicate = currentDb.some(b => 
+                b.tipo === record.tipo && b.numeroSerie === record.numeroSerie
+            );
+            
+            // 2. Checagem de duplicidade DENTRO do arquivo
+            const isFileDuplicate = keysBeingImported.has(keyToValidate);
+
+            if (isDbDuplicate || isFileDuplicate) {
+                 ignoredCount++;
+                 continue;
+            }
+            keysBeingImported.add(keyToValidate);
+
         } else {
-            newRecords.push(record);
+            // Ignora coleção desconhecida
+            continue;
         }
+        
+        newRecords.push(record);
     }
 
     if (newRecords.length > 0) {
@@ -3592,7 +4340,7 @@ async function processImportedData(collectionName, data) {
             await batch.commit();
             let msg = `${newRecords.length} registros de ${collectionName} importados com sucesso.`;
             if (ignoredCount > 0) {
-                msg += `<br>(${ignoredCount} duplicatas ignoradas.)`;
+                msg += `<br>(${ignoredCount} duplicatas de Série/Frota/Tipo+Série ignoradas.)`;
             }
             showModal('Importação Concluída', msg, 'success');
         } catch (error) {
@@ -3601,14 +4349,15 @@ async function processImportedData(collectionName, data) {
     } else {
         let msg = 'Nenhum registro novo válido foi encontrado no arquivo.';
         if (ignoredCount > 0) {
-            msg += `<br>(${ignoredCount} duplicatas ignoradas.)`;
+            msg += `<br>(${ignoredCount} duplicatas de Série/Frota/Tipo+Série ignoradas.)`;
         }
         showModal('Importação', msg, 'info');
     }
 }
 
-
 // -------------------------------------------------------------------------------------
+
+// --- Inicialização ---
 
 // --- Inicialização ---
 
@@ -3623,6 +4372,7 @@ window.handleLogout = handleLogout; // Expondo handleLogout
 window.handleSearchInput = handleSearchInput;
 window.loadRadioForEdit = loadRadioForEdit;
 window.loadEquipamentoForEdit = loadEquipamentoForEdit;
+window.loadBordoForEdit = loadBordoForEdit; // 🌟 NOVO: Expondo loadBordoForEdit
 window.showPermissionModal = showPermissionModal;
 window.renderApp = renderApp;	
 window.updateState = updateState;	
@@ -3632,6 +4382,7 @@ window.loadUserForEdit = loadUserForEdit;
 window.deleteUser = deleteUser;
 window.setRadioPage = setRadioPage;
 window.setEquipamentoPage = setEquipamentoPage;
+window.setBordosPage = setBordosPage; // 🌟 NOVO: Expondo paginação Bordos
 window.setGeralPage = setGeralPage;
 window.setPesquisaPage = setPesquisaPage; // 🌟 NOVO: Expondo paginação da pesquisa
 window.handleSolicitarAcesso = handleSolicitarAcesso; 
@@ -3655,11 +4406,12 @@ window.savePersonalName = savePersonalName;
 window.changePassword = changePassword;
 
 // 🌟 CORREÇÃO DE ERROS DE REFERÊNCIA: Expondo as constantes de Tooltip e Tema
+document.addEventListener('DOMContentLoaded', initApp);
 window.RADIO_IMPORT_INFO = RADIO_IMPORT_INFO;
 window.EQUIPAMENTO_IMPORT_INFO = EQUIPAMENTO_IMPORT_INFO;
+window.BORDO_IMPORT_INFO = BORDO_IMPORT_INFO; // 🌟 NOVO: Expondo constante de Bordo
 window.toggleTheme = toggleTheme;
 
 
 
 window.onload = initApp;
-

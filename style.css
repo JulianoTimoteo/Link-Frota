@@ -21,14 +21,22 @@ html { font-family: 'Inter', 'sans-serif'; }
     to { opacity: 1; }
 }
 
-/* Estilo para os cards do dashboard com o novo verde */
+/* ESTILOS REVISADOS PARA OS CARDS DO DASHBOARD */
 .futuristic-card {
     transition: all 0.3s ease;
-    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05), inset 0 0 8px var(--green-alpha);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+    border: 1px solid #e5e7eb;
 }
+
 .futuristic-card:hover {
-    transform: translateY(-4px);
-    box-shadow: 0 10px 15px rgba(0, 0, 0, 0.1), inset 0 0 12px var(--green-alpha);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(64, 128, 12, 0.15);
+}
+
+/* Card ativo/em destaque */
+.futuristic-card.active,
+.futuristic-card:focus {
+    box-shadow: 0 0 0 3px rgba(64, 128, 12, 0.2);
 }
 
 /* ------------------------------------------------ */

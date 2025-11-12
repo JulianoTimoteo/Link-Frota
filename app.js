@@ -2273,12 +2273,37 @@ function renderDashboard() {
     const radiosManutencao = activeRadios.filter(r => r.status === 'Manutenção').length;
     const radiosSinistro = activeRadios.filter(r => r.status === 'Sinistro').length;
 
-    // --- 2. Cálculos de Bordos ---
+    // --- 2. Cálculos de Bordos (Início) ---
     const activeBordos = dbBordos.filter(b => b.ativo !== false);
-    const totalBordos = activeBordos.length;
-    const bordosEmUso = activeBordos.filter(b => b.status === 'Em Uso').length;
+
+    // --- Cálculo de Stats de Bordos (Resumo por Tipo) ---
+    const bordoStats = {
+        Tela: { Total: 0, 'Em Uso': 0, 'Disponível': 0, 'Manutenção': 0, 'Sinistro': 0 },
+        Mag: { Total: 0, 'Em Uso': 0, 'Disponível': 0, 'Manutenção': 0, 'Sinistro': 0 },
+        Chip: { Total: 0, 'Em Uso': 0, 'Disponível': 0, 'Manutenção': 0, 'Sinistro': 0 }
+    };
     
-    // Contagem de Disponíveis (para Kits)
+    activeBordos.forEach(b => {
+        if (bordoStats[b.tipo]) {
+            bordoStats[b.tipo].Total++;
+            const statusKey = b.status || 'Disponível';
+            if (bordoStats[b.tipo][statusKey] !== undefined) {
+                bordoStats[b.tipo][statusKey]++;
+            }
+        }
+    });
+
+
+    // --- 2. Cálculos de Bordos (Continuação) ---
+    
+    // "Total Kits Bordo" (Total de kits completos que a empresa possui)
+    const totalBordos = Math.min(bordoStats.Tela.Total, bordoStats.Mag.Total, bordoStats.Chip.Total);
+    
+    // 🌟 CORREÇÃO: "Kits em Uso" (Total de kits completos instalados)
+    // Conta quantos registros de vínculo possuem os 3 itens de bordo.
+    const bordosEmUso = dbRegistros.filter(reg => reg.telaId && reg.magId && reg.chipId).length;
+    
+    // Contagem de Disponíveis (para "Kits Disponíveis")
     const bordosDisponiveis = activeBordos.filter(b => b.status === 'Disponível');
     const dispTelas = bordosDisponiveis.filter(b => b.tipo === 'Tela').length;
     const dispMags = bordosDisponiveis.filter(b => b.tipo === 'Mag').length;
@@ -2289,7 +2314,6 @@ function renderDashboard() {
     const bordosManutencao = activeBordos.filter(b => b.status === 'Manutenção');
     const manutTelas = bordosManutencao.filter(b => b.tipo === 'Tela').length;
     const manutMags = bordosManutencao.filter(b => b.tipo === 'Mag').length;
-    // Chip não entra em manutenção, conforme solicitado.
 
     // Contagem de Sinistro
     const bordosSinistro = activeBordos.filter(b => b.status === 'Sinistro');
@@ -2310,23 +2334,6 @@ function renderDashboard() {
         }
     });
     
-    // --- 4. Cálculos da Tabela de Bordos (Resumo por Tipo) ---
-    const bordoStats = {
-        Tela: { Total: 0, 'Em Uso': 0, 'Disponível': 0, 'Manutenção': 0, 'Sinistro': 0 },
-        Mag: { Total: 0, 'Em Uso': 0, 'Disponível': 0, 'Manutenção': 0, 'Sinistro': 0 },
-        Chip: { Total: 0, 'Em Uso': 0, 'Disponível': 0, 'Manutenção': 0, 'Sinistro': 0 }
-    };
-    
-    activeBordos.forEach(b => {
-        if (bordoStats[b.tipo]) {
-            bordoStats[b.tipo].Total++;
-            const statusKey = b.status || 'Disponível';
-            if (bordoStats[b.tipo][statusKey] !== undefined) {
-                bordoStats[b.tipo][statusKey]++;
-            }
-        }
-    });
-
     // --- 5. Helper de Renderização de Card ---
     const _renderStatCard = (title, value, iconClass, colorClass, details = null) => {
         return `
@@ -2361,8 +2368,8 @@ function renderDashboard() {
     // Bordos
     const cardHtmlBordos = `
         <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-            ${_renderStatCard('Total Bordos', totalBordos, 'fa-memory', 'bg-blue-600')}
-            ${_renderStatCard('Bordos em Uso', bordosEmUso, 'fa-microchip', 'bg-green-main')}
+            ${_renderStatCard('Total Kits Bordo', totalBordos, 'fa-memory', 'bg-blue-600')}
+            ${_renderStatCard('Kits em Uso', bordosEmUso, 'fa-microchip', 'bg-green-main')}
             
             ${_renderStatCard('Kits Disponíveis', kitsDisponiveis, 'fa-boxes', 'bg-sky-500')}
             
@@ -2375,7 +2382,7 @@ function renderDashboard() {
 
     // --- 7. Geração do HTML das Tabelas ---
 
-    // Tabela de Equipamentos (Com correção de cor e remoção da coluna Prefixo)
+    // Tabela de Equipamentos
     const tableRowsEquipamentos = GROUPS.map(group => {
         const count = groupCounts[group] || 0;
         return `
@@ -2388,7 +2395,7 @@ function renderDashboard() {
     
     const totalEquipamentos = dbRegistros.length;
     
-    // NOVA Tabela de Bordos (Com correção de cor e cabeçalhos abreviados)
+    // Tabela de Bordos (Resumo por tipo/componente)
     const tableRowsBordos = TIPOS_BORDO.map(tipo => {
         const stats = bordoStats[tipo];
         return `
@@ -2443,7 +2450,7 @@ function renderDashboard() {
                 <div class="bg-white dark:bg-gray-800 rounded-xl shadow-xl p-6 border border-gray-200 dark:border-gray-700 futuristic-card">
                     <h3 class="text-xl font-semibold text-gray-800 dark:text-gray-100 mb-4 flex items-center">
                         <i class="fas fa-microchip mr-2 text-blue-500"></i>	
-                        Resumo de Bordos (Total Ativos: ${totalBordos})
+                        Resumo de Componentes de Bordo (Total: ${activeBordos.length})
                     </h3>
                     <div class="overflow-x-auto">
                         <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
@@ -5456,6 +5463,7 @@ window.addEventListener('appinstalled', () => {
   const popup = document.getElementById('pwa-install-popup');
   if (popup) popup.remove();
 });
+
 
 
 

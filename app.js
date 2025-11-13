@@ -1275,164 +1275,140 @@ async function saveUser(e) {
     const id = document.getElementById('user-id').value;
     const name = document.getElementById('user-name').value.trim();
     let email = document.getElementById('user-username').value.trim(); // Email
-    const customUsername = document.getElementById('user-custom-username').value.trim(); // NOVO: Nome de usuário
-    const password = document.getElementById('user-password').value; // Senha (apenas para criação/reset)
+    const customUsername = document.getElementById('user-custom-username').value.trim(); // Nome de usuário
+    const password = document.getElementById('user-password').value; // Senha
     const role = document.getElementById('user-role').value;
     
-    // Validação de campos obrigatórios
+    // Validação básica de campos obrigatórios
     if (!name || !role) {
         showModal('Erro', 'Nome Completo e Perfil são obrigatórios.', 'error');
         return;
     }
 
-    // 1. Lógica de email/username
+    // 1. Definição do Email de Login (Real ou Genérico)
+    // Se usou Nome de Usuário, criamos um email "fake" para o Firebase aceitar
+    let finalEmail = email;
+    
     if (customUsername) {
-        // Se houver customUsername, o email é opcional.
-        if (!email) {
-            // Gera email genérico se customUsername existe e email não.
-            email = createGenericEmail(customUsername, appId);
-        } else if (!isEmail(email)) {
-            showModal('Erro', 'O campo Username (Email) deve ser um email válido ou vazio se usar Nome de Usuário.', 'error');
+        if (!finalEmail) {
+            // Função auxiliar que já existe no seu código
+            finalEmail = createGenericEmail(customUsername, appId);
+        }
+    } else {
+        // Se NÃO usou Nome de Usuário, o email é obrigatório e deve ser válido
+        if (!finalEmail || !isEmail(finalEmail)) {
+            showModal('Erro', 'É necessário informar um Email válido ou um Nome de Usuário.', 'error');
             return;
         }
-    } else if (!isEmail(email)) {
-        // Se não houver customUsername, o email é obrigatório e deve ser válido.
-        showModal('Erro', 'Username (Email) é obrigatório ou forneça um Nome de Usuário.', 'error');
-        return;
     }
 
-
-    const usersFromDB = settings.users;
     const isEditing = !!id;
-    
-    // 2. Checagem de duplicidade (Username/Email E Nome de Usuário)
-    const isDuplicateEmail = usersFromDB.some(u => 
-        u.username === email && (!isEditing || u.id !== id)
+    const usersFromDB = settings.users; // Referência local atual
+
+    // 2. Checagem de duplicidade na lista local antes de ir pro servidor
+    // Verifica se o email ou o nome de usuário já existem em outro ID
+    const isDuplicate = usersFromDB.some(u => 
+        (u.username === finalEmail || (customUsername && u.customUsername === customUsername)) && 
+        (!isEditing || u.id !== id)
     );
 
-    if (isDuplicateEmail) {
-        showModal('Erro', `Este Email (${email}) já está em uso.`, 'error');
+    if (isDuplicate) {
+        showModal('Erro', `Este usuário ou email (${finalEmail}) já está cadastrado no sistema.`, 'error');
         return;
     }
 
-    if (customUsername) {
-         const isDuplicateCustomUsername = usersFromDB.some(u => 
-             u.customUsername && u.customUsername.toLowerCase() === customUsername.toLowerCase() && (!isEditing || u.id !== id)
-         );
-         if (isDuplicateCustomUsername) {
-             showModal('Erro', `Este Nome de Usuário (${customUsername}) já está em uso.`, 'error');
-             return;
-         }
+    // 3. CRIAÇÃO NO FIREBASE AUTH (O Passo Crucial)
+    // Se for um NOVO usuário, tentamos criar o login no Firebase antes de salvar no banco
+    if (!isEditing) {
+        if (password.length < 6) {
+            showModal('Erro', 'A senha deve ter no mínimo 6 caracteres.', 'error');
+            return;
+        }
+
+        try {
+            // Tenta criar o login oficial no Authentication
+            await createUserWithEmailAndPassword(auth, finalEmail, password);
+        } catch (e) {
+            if (e.code === 'auth/email-already-in-use') {
+                // Se já existe, avisamos mas permitimos continuar (para sincronizar o banco)
+                showModal('Aviso', `O login ${finalEmail} já existe no Firebase Auth. O perfil local será apenas criado/sincronizado.`, 'warning');
+            } else {
+                console.error(e);
+                // Se der outro erro (ex: erro de rede), paramos TUDO. Não salva no banco.
+                showModal('Erro de Auth', `Não foi possível criar o login: ${e.message}`, 'error');
+                return; 
+            }
+        }
     }
 
+    // 4. Preparação do Objeto para o Firestore
     let userToSave;
-    let shouldCreateAuth = false;
-    let shouldUpdateAuthPassword = false;
-
+    
     if (isEditing) {
+        // Modo Edição
         userToSave = usersFromDB.find(u => u.id === id);
         if (!userToSave) {
-            showModal('Erro', 'Erro ao encontrar usuário para edição.', 'error');
+            showModal('Erro', 'Usuário original não encontrado.', 'error');
             return;
         }
         
-        // Se a senha foi preenchida na edição
-        if (password.length > 0) {
-            if (password.length < 6) {
-                showModal('Erro', 'A senha deve ter pelo menos 6 caracteres para ser salva.', 'error');
-                return;
-            }
-            shouldUpdateAuthPassword = true;
-        }
-
+        // Atualiza dados
         userToSave.name = name;
-        userToSave.username = email;
+        userToSave.username = finalEmail;
         userToSave.customUsername = customUsername;
         userToSave.role = role;
-        // Mantém as permissões existentes
 
+        // Se estiver editando e digitou uma senha, atualizamos a "senha de referência" 
+        // (Apenas para usuários de login customizado, já que admin não muda senha Auth de outros sem saber a antiga)
+        if (password.length >= 6 && customUsername) {
+            userToSave.loginPassword = password; 
+        }
     } else {
-        // Novo usuário
-        if (password.length < 6) {
-            showModal('Erro', 'Para um novo usuário, a Senha é obrigatória e deve ter pelo menos 6 caracteres.', 'error');
-            return;
-        }
-
-        userToSave = { 
-            id: crypto.randomUUID(), // Novo ID único
-            name, 
-            username: email, // O email (real ou fake) que será usado no Firebase Auth
-            customUsername, // O nome de usuário de login (se existir)
-            role, 
-            permissions: {} // Permissões padrão vazias
+        // Modo Criação (Novo)
+        userToSave = { 
+            id: crypto.randomUUID(), 
+            name, 
+            username: finalEmail, 
+            customUsername, 
+            role, 
+            permissions: { dashboard: true, cadastro: true, pesquisa: true, settings: role === 'admin' }
         };
-        // Adiciona o novo usuário ao clone da lista
+
+        // Para usuários com nome customizado, salvamos a senha no banco para validação extra se necessário
+        if (customUsername) {
+            userToSave.loginPassword = password;
+        }
+        // Adiciona na lista
         usersFromDB.push(userToSave);
-        shouldCreateAuth = true;
-    }
-    
-    // Definição de permissões padrão para um novo usuário ou se o perfil mudou para admin
-    if (!isEditing || role === 'admin') {
-        userToSave.permissions = {
-            dashboard: true, cadastro: true, pesquisa: true, settings: role === 'admin'
-        };
     }
 
+    // 5. Gravação no Banco de Dados (Firestore)
     try {
-        // 3. (NOVO) Criar/Atualizar Usuário no Firebase Auth
-        if (shouldCreateAuth && !userToSave.customUsername) { // Apenas tenta criar no Auth se for email real
-            try {
-                 await createUserWithEmailAndPassword(auth, email, password);
-            } catch (e) {
-                 if (e.code === 'auth/email-already-in-use') {
-                      showModal('Aviso', `O email ${email} já existe no Firebase Auth. O perfil será criado apenas no Firestore.`, 'warning');
-                 } else {
-                      throw e; // Lança o erro para o bloco catch externo
-                 }
-            }
-        }
-        
-        // Se for edição e a senha foi alterada
-        if (shouldUpdateAuthPassword) {
-            // Se for customUsername, armazenamos a senha para check local (método não-padrão)
-            if (userToSave.customUsername) {
-                userToSave.loginPassword = password; 
-            } else {
-                // Para login por email normal, a senha deve ser alterada pelo próprio usuário via modal de perfil.
-                showModal('Aviso de Senha', 'Para usuários com email real, a senha só pode ser alterada via reautenticação do próprio usuário. O campo de senha para este perfil foi ignorado.', 'warning');
-            }
-        } else if (shouldCreateAuth && userToSave.customUsername) {
-            // Para novos usuários com customUsername, armazena a senha inicial para o check no login.
-            userToSave.loginPassword = password; 
-        }
-
-        // 4. Salva a lista completa no Firestore (incluindo customUsername e loginPassword)
         const settingsDocRef = doc(db, "artifacts", appId, "public", "data", "settings", "config");
+        // Salva a lista inteira atualizada
         await setDoc(settingsDocRef, { users: usersFromDB }, { merge: true });
 
-        showModal('Sucesso', `Perfil de ${name} ${isEditing ? 'atualizado' : 'cadastrado'} com sucesso!`, 'success');
+        showModal('Sucesso', `Perfil de ${name} salvo com sucesso! Login ativo.`, 'success');
         
-        // Força a re-renderização
+        // Atualiza a tela e limpa o formulário
         renderApp();
-
-        // Limpa o formulário após a próxima renderização para evitar o erro "Cannot read properties of null (reading 'reset')"
+        
+        // Timeout pequeno para garantir que o DOM atualizou antes de limpar
         setTimeout(() => {
             const currentForm = document.getElementById('form-user');
             if (currentForm) {
                 currentForm.reset();
                 document.getElementById('user-id').value = '';
-                document.getElementById('user-form-title').textContent = 'Novo Perfil de Usuário';
-                document.getElementById('user-password-field').classList.remove('hidden');
+                const titleEl = document.getElementById('user-form-title');
+                if(titleEl) titleEl.textContent = 'Novo Perfil de Usuário';
+                const passField = document.getElementById('user-password-field');
+                if(passField) passField.classList.remove('hidden');
             }
         }, 100);
 
     } catch (e) {
-        console.error("Erro ao salvar perfil de usuário/Auth:", e);
-        let msg = 'Não foi possível salvar o perfil. Verifique se o usuário já existe no Firebase Auth ou se a senha tem 6+ caracteres.';
-        if (e.code === 'auth/email-already-in-use') {
-            msg = `O email (${email}) já está em uso no Firebase Auth. Verifique o console do Firebase ou exclua o usuário primeiro.`;
-        }
-        showModal('Erro', msg, 'error');
+        console.error("Erro ao salvar no Firestore:", e);
+        showModal('Erro', 'O login foi criado no Auth, mas houve falha ao salvar os dados no banco de dados.', 'error');
     }
 }
 
@@ -1471,83 +1447,88 @@ async function deleteUser(id) {
 // --- Funções de Gerenciamento de Pendências (Novo) ---
 
 async function approveUser(pendingId, name, email, tempPassword) {
-    if (!db || !appId || currentUser.role !== 'admin') {
-        showModal('Acesso Negado', 'Você não tem permissão para aprovar usuários.', 'error');
+    if (!db || !appId || !currentUser || currentUser.role !== 'admin') {
+        showModal('Acesso Negado', 'Você não tem permissão ou conexão para realizar esta ação.', 'error');
         return;
     }
 
-    const usersFromDB = settings.users;
-    
-    // 1. Criar usuário no Firebase Auth
+    // 1. Tenta criar o Usuário no Firebase Authentication (Login real)
+    let authCreationSuccess = false;
     try {
+        // Isso cria o usuário no painel "Authentication" do Firebase
         await createUserWithEmailAndPassword(auth, email, tempPassword);
+        authCreationSuccess = true;
     } catch (e) {
         if (e.code === 'auth/email-already-in-use') {
-             // Se o email já estiver em uso, apenas o adicionamos ao Firestore
-             showModal('Aviso de Auth', `O email ${email} já existe no Firebase Auth. Apenas o perfil no sistema será criado.`, 'warning');
+            // Se já existe no Auth, permitimos continuar para criar apenas o registro no banco (Firestore)
+            // Isso corrige casos onde o usuário foi deletado do banco mas não do Auth
+            console.warn(`O email ${email} já existia no Auth. Prosseguindo para criar no Banco de Dados.`);
+            authCreationSuccess = true; 
         } else {
-             showModal('Erro de Auth', `Erro ao criar usuário no Firebase Auth: ${e.message}`, 'error');
-             return;
+            console.error("Erro ao criar no Auth:", e);
+            showModal('Erro Crítico', `O Firebase recusou a criação da senha: ${e.message}`, 'error');
+            return; // Aborta tudo se não conseguir criar o login
         }
     }
 
-    // 2. Adicionar usuário na lista de usuários do sistema (settings.users)
-    const newUser = { 
-        id: crypto.randomUUID(), // Novo ID único
-        name, 
-        username: email, 
-        role: 'user', // Começa como usuário padrão
-        permissions: { dashboard: true, cadastro: true, pesquisa: true, settings: false } // Permissões padrão
-    };
-    usersFromDB.push(newUser);
+    if (!authCreationSuccess) return;
 
-    // 3. Remover da lista de pendências (pending_approvals)
-    // [CORREÇÃO] Usa appId hardcoded
-    const pendingDocRef = doc(db, `artifacts/${appId}/public/data/pending_approvals`, pendingId);
-
+    // 2. Se o login foi criado (ou já existia), agora salvamos os DADOS no Firestore
     try {
-        // Usa batch para garantir atomicidade das operações
-        const batch = writeBatch(db);
-        
-        // 3a. Remover pendência
-        batch.delete(pendingDocRef);
-
-        // 3b. Salvar nova lista de usuários
+        // Recarrega a lista mais recente do banco para evitar sobrescrever dados de outros admins
         const settingsDocRef = doc(db, "artifacts", appId, "public", "data", "settings", "config");
-        batch.update(settingsDocRef, { users: usersFromDB });
+        const settingsSnap = await getDoc(settingsDocRef);
         
-        await batch.commit();
+        let currentUsers = [];
+        if (settingsSnap.exists() && settingsSnap.data().users) {
+            currentUsers = settingsSnap.data().users;
+        }
 
-        // 4. Notificar sucesso e fechar modal
-        hideModal();
-        showModal('Usuário Aprovado', `O usuário <b>${name}</b> (${email}) foi aprovado como 'Usuário Padrão'. Ele pode logar agora.`, 'success');
-        renderApp(); 
+        // Verifica se já não existe na lista do banco para não duplicar visualmente
+        const alreadyInDb = currentUsers.some(u => u.username === email);
         
+        if (!alreadyInDb) {
+            const newUser = { 
+                id: crypto.randomUUID(), 
+                name: name, 
+                username: email, // Este email deve bater com o Authentication
+                role: 'user', // Padrão: usuário comum
+                permissions: { dashboard: true, cadastro: true, pesquisa: true, settings: false }
+            };
+            
+            currentUsers.push(newUser);
+
+            // 3. Executa a gravação no banco e remove a pendência (Batch = Atômico)
+            const batch = writeBatch(db);
+            
+            // Atualiza lista de usuários
+            batch.update(settingsDocRef, { users: currentUsers });
+            
+            // Remove da lista de pendências
+            // [CORREÇÃO] Garante o caminho correto com seu appId
+            const pendingDocRef = doc(db, `artifacts/${appId}/public/data/pending_approvals`, pendingId);
+            batch.delete(pendingDocRef);
+
+            await batch.commit();
+            
+            // Atualiza a memória local
+            settings.users = currentUsers;
+            
+            hideModal();
+            showModal('Sucesso', `Usuário <b>${name}</b> aprovado!<br>Login: ${email}<br>Senha: ${tempPassword}<br><br>Ele já pode logar.`, 'success');
+            
+            // Atualiza a tela
+            renderApp();
+        } else {
+            // Se já estava no banco, apenas remove a pendência
+            await deleteDoc(doc(db, `artifacts/${appId}/public/data/pending_approvals`, pendingId));
+            showModal('Aviso', 'O usuário já constava no banco de dados. A pendência duplicada foi removida.', 'warning');
+            renderApp();
+        }
+
     } catch (e) {
-        showModal('Erro', 'Não foi possível aprovar o usuário.', 'error');
-    }
-}
-
-async function rejectUser(pendingId, name) {
-    if (!db || !appId || currentUser.role !== 'admin') {
-        showModal('Acesso Negado', 'Você não tem permissão para negar usuários.', 'error');
-        return;
-    }
-
-    // 1. Remover da lista de pendências (pending_approvals)
-    // [CORREÇÃO] Usa appId hardcoded
-    const pendingDocRef = doc(db, `artifacts/${appId}/public/data/pending_approvals`, pendingId);
-    
-    try {
-        await deleteDoc(pendingDocRef);
-
-        // 2. Notificar sucesso e fechar modal
-        hideModal();
-        showModal('Usuário Negado', `O acesso de <b>${name}</b> foi negado e removido da lista de pendências.`, 'warning');
-        renderApp(); 
-        
-    } catch (e) {
-        showModal('Erro', 'Não foi possível negar o acesso.', 'error');
+        console.error("Erro ao salvar dados no Firestore:", e);
+        showModal('Erro de Dados', 'O login foi criado, mas houve erro ao salvar os dados no sistema. Tente atualizar a página.', 'error');
     }
 }
 
@@ -3840,38 +3821,34 @@ async function changePassword(e) {
     }
 
     try {
-        // Para usuários com email real (não fake), usamos o Firebase Auth
-        if (!currentUser.customUsername) {
-            // NOTE: updatePassword requer que o usuário tenha se logado recentemente
-            await updatePassword(auth.currentUser, newPassword);
-            showModal('Sucesso', 'Senha alterada com sucesso via Firebase Auth!', 'success');
+        const user = auth.currentUser;
+        
+        if (user) {
+            // ATUALIZAÇÃO UNIFICADA: 
+            // Independente se usa Email ou Nome de Usuário, a senha é atualizada no sistema de Autenticação do Firebase.
+            await updatePassword(user, newPassword);
+            
+            showModal('Sucesso', 'Sua senha foi atualizada com sucesso! Use a nova senha no próximo login.', 'success');
+            hideProfileModal();
+            
+            // Limpa o formulário
+            document.getElementById('form-change-password').reset();
         } else {
-            // Para usuários customizados (com email fake), a senha deve ser salva no Firestore (método não-padrão)
-            const settingsDocRef = doc(db, "artifacts", appId, "public", "data", "settings", "config");
-            let usersFromDB = settings.users;
-            const userIndex = usersFromDB.findIndex(u => u.id === currentUser.id);
-
-            if (userIndex === -1) {
-                showModal('Erro', 'Seu perfil customizado não foi encontrado.', 'error');
-                return;
-            }
-
-            usersFromDB[userIndex].loginPassword = newPassword; // Salva a senha para o próximo login
-            await setDoc(settingsDocRef, { users: usersFromDB }, { merge: true });
-            showModal('Sucesso', 'Senha de login customizado alterada com sucesso!', 'success');
+            showModal('Erro', 'Sessão não identificada. Por favor, faça login novamente.', 'error');
         }
-        hideProfileModal();
+
     } catch (e) {
         console.error("Erro ao alterar senha:", e);
-        let msg = 'Erro ao alterar a senha. Você pode precisar fazer login novamente (reautenticação) para alterar a senha.';
+        
+        let msg = 'Erro ao alterar a senha.';
         if (e.code === 'auth/requires-recent-login') {
-            msg = 'Sua sessão expirou. Por favor, saia do sistema e faça login novamente para alterar sua senha.';
+            // Medida de segurança do Firebase
+            msg = 'Por segurança, esta operação exige um login recente. Saia do sistema (Logout) e entre novamente para alterar sua senha.';
         } else if (e.code === 'auth/weak-password') {
-            msg = 'A senha é muito fraca. Deve ter pelo menos 6 caracteres.';
-        } else if (e.code === 'auth/invalid-credential') {
-            msg = 'Credenciais inválidas. O nome de usuário/email pode estar incorreto.';
+            msg = 'A senha é muito fraca. Use letras e números.';
         }
-        showModal('Erro de Senha', msg, 'error');
+        
+        showModal('Erro de Segurança', msg, 'error');
     }
 }
 
@@ -3917,72 +3894,79 @@ async function handleLoginSubmit(e) {
     const loginInput = document.getElementById('login-input');
     const passwordInput = document.getElementById('password');
     const rememberMeCheckbox = document.getElementById('remember-me');
+    
     const loginIdentifier = loginInput.value.trim();
     const password = passwordInput.value;
     
-    // [NOVO] Salvar/Remover Login no localStorage
+    // Validação simples de preenchimento
+    if (!loginIdentifier || !password) {
+        showModal('Atenção', 'Por favor, preencha o usuário/email e a senha.', 'warning');
+        return;
+    }
+
+    // Salva preferência de "Lembrar Login"
     if (rememberMeCheckbox.checked) {
         localStorage.setItem('rememberedLogin', loginIdentifier);
     } else {
         localStorage.removeItem('rememberedLogin');
     }
 
+    // Ativa o estado de carregamento
     isLoggingIn = true;
-    renderApp();	
+    renderApp(); 
 
     let emailToLogin = '';
-    let isCustomLogin = false;
     
-    // 1. Determinar se é email ou nome de usuário
+    // 1. Identifica se o usuário digitou um Email ou um Nome de Usuário
     if (isEmail(loginIdentifier)) {
         emailToLogin = loginIdentifier;
     } else {
-        // 2. Se não for email, procura por customUsername no Firestore settings
-        const appUser = settings.users.find(u => u.customUsername && u.customUsername.toLowerCase() === loginIdentifier.toLowerCase());
+        // Se digitou nome de usuário, precisamos descobrir o email atrelado a ele.
+        // Buscamos na lista de configurações carregada na inicialização.
+        const appUser = settings.users.find(u => 
+            u.customUsername && u.customUsername.toLowerCase() === loginIdentifier.toLowerCase()
+        );
         
         if (appUser) {
-            // Usuário encontrado pelo nome de usuário
             emailToLogin = appUser.username;
-            isCustomLogin = true;
-
-            // NOTA: Para customUsername (loginPassword armazenado no Firestore), fazemos uma checagem local.
-            // Isso é menos seguro, mas necessário para suportar a feature solicitada sem depender do Firebase Auth para o username.
-            if (appUser.loginPassword !== password) {
-                 isLoggingIn = false;
-                 renderApp();
-                 showModal('Erro de Login', 'Nome de usuário ou senha inválidos.', 'error');
-                 return;
-            }
         } else {
-             // Não é email e não é customUsername
-             isLoggingIn = false;
-             renderApp();
-             showModal('Erro de Login', 'Login inválido. Tente novamente com email ou nome de usuário cadastrado.', 'error');
-             return;
+            // Se não encontrou o nome de usuário na lista local
+            isLoggingIn = false;
+            renderApp();
+            showModal('Erro de Login', 'Usuário não encontrado no cadastro do sistema.', 'error');
+            return;
         }
     }
     
-    // 3. Tenta autenticar no Firebase Auth com o emailToLogin
+    // 2. Autenticação OBRIGATÓRIA via Firebase Auth
+    // Aqui removemos a checagem local. A senha quem valida é o Firebase.
     try {
-        // Para logins customizados, a checagem de senha já foi feita acima.
-        // O Firebase Auth cuida da checagem de senha para logins baseados em email normal.
-        
         await signInWithEmailAndPassword(auth, emailToLogin, password);
-        // Sucesso: onAuthStateChanged cuidará do resto (incluindo o splash screen)
         
+        // Se der certo, não precisamos fazer mais nada aqui.
+        // O "onAuthStateChanged" (que já está configurado no seu código) vai detectar
+        // a mudança de estado e carregar o Dashboard automaticamente.
+        console.log("Login validado com sucesso pelo Firebase.");
+
     } catch (error) {
+        console.error("Erro no login:", error);
         isLoggingIn = false;
-        renderApp();	
+        renderApp(); // Remove a tela de carregamento
         
-        let msg = 'Email ou senha inválidos. Tente novamente.';
-        if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
-            msg = 'Email ou senha inválidos.';
-        } else if (error.code === 'auth/invalid-email') {
-            msg = 'O formato do login é inválido.';
-        } else if (error.code === 'auth/operation-not-allowed') {
-            msg = 'Login por Email/Senha não está ativado no Firebase.';
+        let msg = 'Falha ao entrar. Verifique suas credenciais.';
+        
+        // Tradução de erros comuns do Firebase para o usuário
+        if (error.code === 'auth/user-not-found' || error.code === 'auth/invalid-email') {
+            msg = 'Usuário não encontrado ou email inválido.';
+        } else if (error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
+            msg = 'Senha incorreta.';
+        } else if (error.code === 'auth/too-many-requests') {
+            msg = 'Muitas tentativas consecutivas. Aguarde um momento antes de tentar novamente.';
+        } else if (error.code === 'auth/user-disabled') {
+            msg = 'Este usuário foi desativado no sistema.';
         }
-        showModal('Erro de Login (Interno)', msg, 'error');
+        
+        showModal('Acesso Negado', msg, 'error');
     }
 }
 
@@ -5416,43 +5400,5 @@ window.deleteDuplicityWrapper = (collectionName, id, value) => {
 window.showVincularModal = showVincularModal;
 window.hideVincularModal = hideVincularModal; 
 // 🛑 handleDesvincularBordoIndividual NÃO É MAIS NECESSÁRIO como função separada no HTML
-
-// 🎯 EXPOSIÇÃO DE FUNÇÕES PWA NECESSÁRIAS
-window.handlePwaPromptClose = handlePwaPromptClose;
-window.showInstallDialog = showInstallDialog; 
-// --- Configuração do PWA ---
-window.addEventListener('beforeinstallprompt', (e) => {
-  e.preventDefault();
-  deferredPrompt = e;
-  const modal = document.createElement('div');
-  modal.id = 'pwa-install-popup';
-  modal.innerHTML = `
-    <div style="position:fixed;bottom:20px;right:20px;background:#fff;padding:16px;border-radius:8px;box-shadow:0 0 10px rgba(0,0,0,0.2);z-index:9999">
-      <p>Deseja instalar o aplicativo?</p>
-      <button id="btnPwaInstall">Instalar</button>
-      <button id="btnPwaClose">Agora não</button>
-    </div>`;
-  document.body.appendChild(modal);
-
-  document.getElementById('btnPwaInstall').onclick = async () => {
-    modal.remove();
-    deferredPrompt.prompt();
-    const choice = await deferredPrompt.userChoice;
-    deferredPrompt = null;
-    console.log('Instalação PWA:', choice.outcome);
-  };
-  document.getElementById('btnPwaClose').onclick = () => modal.remove();
-});
-
-window.addEventListener('appinstalled', () => {
-  console.log('PWA instalado com sucesso');
-  const popup = document.getElementById('pwa-install-popup');
-  if (popup) popup.remove();
-});
-
-
-
-
+// --- Inicialização do Sistema ---
 window.onload = initApp;
-
-

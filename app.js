@@ -4847,43 +4847,48 @@ function initApp() {
         app = initializeApp(FIREBASE_CONFIG);
         auth = getAuth(app);
         db = getFirestore(app);
-        setLogLevel('info');	
+        setLogLevel('info');    
         
-        // --- NOVO: Listener PWA ---
+        // --- Lógica Centralizada do PWA ---
+        
+        // 1. Listener para capturar o evento de instalação (antes que o Chrome mostre o dele)
         window.addEventListener('beforeinstallprompt', (e) => {
-            // Previne que o mini-infobar apareça no mobile
+            // Previne que o mini-infobar nativo apareça no mobile imediatamente
             e.preventDefault();
             
-            // 1. Armazena o evento APENAS se o app não estiver instalado/descartado
+            // Armazena o evento para ser disparado mais tarde pelo botão
+            deferredPrompt = e;
+            console.log("PWA: Evento 'beforeinstallprompt' capturado. Instalação disponível.");
+
+            // Verifica se o usuário já está logado para mostrar o modal imediatamente
+            // (Apenas se ainda não estiver instalado/dismissed)
             const isStandalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
             const dismissed = localStorage.getItem(PWA_PROMPT_KEY);
-            
+
             if (!isStandalone && dismissed !== 'installed' && dismissed !== 'dismissed') {
-                 deferredPrompt = e;
-            }
-            
-            // 2. Se o usuário já estiver logado, dispara a caixa de diálogo Imediatamente.
-            if (currentUser && deferredPrompt) {
-                 showInstallDialog();
-            } else {
-                 renderApp(); 
+                if (currentUser) {
+                    showInstallDialog();
+                }
             }
         });
         
-        // 🛑 NOVO: Listener para registrar que o usuário instalou manualmente (ou via prompt)
+        // 2. Listener para quando o app for instalado com sucesso
         window.addEventListener('appinstalled', () => {
+             console.log("PWA: Aplicativo instalado com sucesso.");
              localStorage.setItem(PWA_PROMPT_KEY, 'installed');
              deferredPrompt = null;
-             // Se o modal customizado estiver aberto, feche-o
              handlePwaPromptClose('install');
         });
         
         // [CORREÇÃO] O setupAuthListener agora chama loadInitialSettings antes do onAuthStateChanged
-        setupAuthListener(); 
+        setupAuthListener(); 
 
     } catch (e) {
         console.error("Erro crítico ao inicializar Firebase:", e);
-        document.getElementById('app').innerHTML = `<div class="p-4 text-red-500 dark:text-red-400 font-semibold text-center">Erro crítico ao inicializar o Firebase. Verifique as configurações e a conexão.</div>`;
+        const appRoot = document.getElementById('app');
+        if (appRoot) {
+            appRoot.innerHTML = `<div class="p-4 text-red-500 dark:text-red-400 font-semibold text-center">Erro crítico ao inicializar o Firebase. Verifique as configurações e a conexão.</div>`;
+        }
     }
 }
 
@@ -4910,7 +4915,7 @@ function renderApp() {
             currentPage = 'dashboard';
             window.location.hash = '#dashboard';
             contentHTML += renderDashboard();
-        } 
+        } 
         // Se a página não for acessível (baseado nas permissões)
         else if (!canAccessCurrentPage && currentPage !== 'login') {
             showModal('Acesso Negado', 'Você não tem permissão para acessar esta página.', 'error');
@@ -4926,7 +4931,7 @@ function renderApp() {
                 default:
                     currentPage = 'dashboard';
                     window.location.hash = '#dashboard';
-                    contentHTML += renderDashboard();	
+                    contentHTML += renderDashboard();   
             }
         }
         contentHTML += '</main>';
@@ -4939,42 +4944,17 @@ function renderApp() {
 
     root.innerHTML = contentHTML;
 
-    // --- PWA: Registro do Service Worker e Pop-up de Instalação ---
-if ('serviceWorker' in navigator) {
-    window.addEventListener('load', async () => {
-        try {
-            await navigator.serviceWorker.register('/service-worker.js');
-            console.log('✅ Service Worker registrado');
-        } catch (e) {
-            console.warn('⚠️ Falha ao registrar SW', e);
-        }
-    });
-}
-
-// Pop-up para solicitar instalação do PWA
-window.addEventListener('beforeinstallprompt', (e) => {
-    e.preventDefault();
-    deferredPrompt = e;
-
-    const promptShown = localStorage.getItem(PWA_PROMPT_KEY);
-    if (promptShown) return;
-
-    setTimeout(() => {
-        const shouldShow = confirm("Deseja instalar este app no seu dispositivo?");
-        if (shouldShow) {
-            deferredPrompt.prompt();
-            deferredPrompt.userChoice.then((choiceResult) => {
-                if (choiceResult.outcome === 'accepted') {
-                    console.log('Usuário aceitou instalar PWA');
-                } else {
-                    console.log('Usuário recusou instalar PWA');
-                    localStorage.setItem(PWA_PROMPT_KEY, 'true');
-                }
-                deferredPrompt = null;
-            });
-        }
-    }, 2000);
-});
+    // --- Registro do Service Worker ---
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', async () => {
+            try {
+                await navigator.serviceWorker.register('/service-worker.js');
+                console.log('✅ Service Worker registrado');
+            } catch (e) {
+                console.warn('⚠️ Falha ao registrar SW', e);
+            }
+        });
+    }
 
     // Anexa eventos
     if (!isLoggingIn) {
@@ -4987,8 +4967,13 @@ window.addEventListener('beforeinstallprompt', (e) => {
             // [CORREÇÃO] Chamada da função de eventos principal
             if (currentPage === 'settings') attachSettingsEvents();
             
-            // Anexa eventos ao modal de perfil, se estiver no DOM
-            // Não é mais necessário renderizar aqui, pois showProfileModal o fará quando aberto.
+            // Tenta mostrar o dialog de instalação se estiver pendente e o usuário acabou de entrar
+            const isStandalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+            const dismissed = localStorage.getItem(PWA_PROMPT_KEY);
+            
+            if (!isStandalone && dismissed !== 'installed' && dismissed !== 'dismissed' && deferredPrompt) {
+                 showInstallDialog();
+            }
         }
     }
     
@@ -5011,13 +4996,16 @@ window.addEventListener('beforeinstallprompt', (e) => {
         const focusedInput = document.getElementById(focusedSearchInputId);
         if (focusedInput) {
             focusedInput.focus();
-            try { focusedInput.setSelectionRange(searchCursorPosition, searchCursorPosition); }	
+            try { focusedInput.setSelectionRange(searchCursorPosition, searchCursorPosition); } 
             catch (e) { /* ignora */ }
         }
     } else {
-        window._searchTermTemp = '';	
+        window._searchTermTemp = '';    
     }
 }
+
+// Inicialização
+window.onload = initApp;
 
 // --- Funções de Modal e Utilitários (Implementação e Exposição Global) ---
 
@@ -5468,3 +5456,4 @@ window.addEventListener('appinstalled', () => {
 
 
 window.onload = initApp;
+

@@ -668,8 +668,7 @@ async function deleteLink(regId, type) {
 
 /**
  * @NOVA IMPLEMENTAÇÃO: Abre modal para vincular Rádio ou Bordos à Frota
- * * [CORREÇÃO APLICADA]: Este modal agora suporta substituição de peças individuais (Bordos),
- * carregando o estado atual da frota para permitir a troca ou a adição de novos itens.
+ * * [CORREÇÃO APLICADA]: Adicionado scroll interno para corrigir visualização mobile.
  * * @param {string} equipamentoId ID da Frota a ser vinculada.
  * @param {'radio'|'bordos'} tipo Tipo de componente a ser vinculado.
  */
@@ -684,9 +683,9 @@ function showVincularModal(equipamentoId, tipo) {
     const registro = dbRegistros.find(reg => reg.equipamentoId === equipamentoId);
     
     // Filtra e mapeia ITENS DISPONÍVEIS para substituição/adição
-    const availableRadios = dbRadios.filter(r =>	
-        r.ativo !== false &&	
-        r.status === 'Disponível' &&	
+    const availableRadios = dbRadios.filter(r =>    
+        r.ativo !== false &&    
+        r.status === 'Disponível' &&    
         !dbRegistros.some(reg => reg.radioId === r.id)
     );
     // Bordos disponíveis: aqueles ativos E com status 'Disponível' E não vinculados a outro registro.
@@ -722,14 +721,13 @@ function showVincularModal(equipamentoId, tipo) {
         let options = '';
         
         // 1. Opção padrão: Selecione/Manter
-        // NOVO: Adiciona a opção "Remover/Manter" como a opção inicial, para permitir desvínculo
         if (linkedItem) {
             options += `<option value="" selected>Manter ${tipo} Atual / Desvincular</option>`;
         } else {
              options += `<option value="" selected>Selecione o ${tipo}</option>`;
         }
 
-        // 2. Adiciona itens disponíveis (que podem ser usados como substitutos/novos)
+        // 2. Adiciona itens disponíveis
         const bordos = bordosPorTipo[tipo] || [];
         options += bordos.map(b => `<option value="${b.id}">${b.numeroSerie} (${b.modelo})</option>`).join('');
         
@@ -741,11 +739,10 @@ function showVincularModal(equipamentoId, tipo) {
     
     let infoHtml = '';
     let formHtml = '';
-    let isEditingMode = !!registro; // Se existe registro, estamos no modo de edição/substituição
+    let isEditingMode = !!registro; 
 
     if (isRadioMode) {
         if (linkedRadio && !isEditingMode) {
-             // Deve ser impossível chegar aqui se a lógica da tabela estiver correta
             infoHtml = '<p class="text-red-500 font-semibold">Erro: Um Rádio já está vinculado a esta Frota. Use a aba Geral para gerenciar.</p>';
         } else {
             const currentRadioDisplay = linkedRadio ? linkedRadio.serie + ' (' + linkedRadio.modelo + ')' : 'NENHUM RÁDIO VINCULADO';
@@ -765,7 +762,6 @@ function showVincularModal(equipamentoId, tipo) {
     } else if (isBordosMode) {
         infoHtml = `<p class="text-gray-700 dark:text-gray-300">Gerencie a Tela, Mag e Chip. Para substituir ou desvincular uma peça, selecione a opção desejada no menu e clique em **"Atualizar Vínculos"**.</p>`;
         
-        // Função para renderizar um bloco de bordo com o estado atual e o seletor de substituição
         const renderBordoBlock = (tipo) => {
             const typeLower = tipo.toLowerCase();
             const linkedItem = linkedBordos[tipo];
@@ -806,7 +802,7 @@ function showVincularModal(equipamentoId, tipo) {
     const actionsEl = document.getElementById('modal-actions');
 
     modal.querySelector('div').classList.remove('max-w-sm', 'max-w-md', 'max-w-lg');
-    modal.querySelector('div').classList.add('max-w-xl'); // Aumentado para acomodar a tabela de bordos
+    modal.querySelector('div').classList.add('max-w-xl'); 
 
     const modalTitle = isEditingMode 
         ? `Gerenciar Vínculos da Frota ${equipamento.frota} (Cód: ${equipamento.codigo || 'N/A'})`
@@ -815,22 +811,25 @@ function showVincularModal(equipamentoId, tipo) {
     titleEl.textContent = modalTitle;
     titleEl.className = `text-xl font-bold mb-3 text-green-main dark:text-green-400`;
     
+    // 🌟 CORREÇÃO AQUI: Adicionado 'max-h-[60vh] overflow-y-auto' para scroll no mobile
     messageEl.innerHTML = `
-        <div class="p-3 bg-gray-50 dark:bg-gray-900 rounded-lg shadow-inner border dark:border-gray-700 space-y-3 mb-4">
-            <p class="font-semibold text-gray-800 dark:text-gray-100">Informações da Frota:</p>
-            <p class="text-sm text-gray-700 dark:text-gray-300"><span class="font-semibold">Grupo:</span> ${equipamento.grupo}</p>
-            <p class="text-sm text-gray-700 dark:text-gray-300"><span class="font-semibold">Modelo:</span> ${equipamento.modelo}</p>
-            <p class="text-sm text-gray-700 dark:text-gray-300"><span class="font-semibold">Código Atual:</span> ${equipamento.codigo || 'N/A'}</p>
-        </div>
-        <div class="mt-4">
-            ${infoHtml}
-            <form id="form-vincular-modal" class="mt-4 space-y-4">
-                ${formHtml}
-            </form>
+        <div class="max-h-[60vh] overflow-y-auto pr-1 custom-scrollbar">
+            <div class="p-3 bg-gray-50 dark:bg-gray-900 rounded-lg shadow-inner border dark:border-gray-700 space-y-3 mb-4">
+                <p class="font-semibold text-gray-800 dark:text-gray-100">Informações da Frota:</p>
+                <p class="text-sm text-gray-700 dark:text-gray-300"><span class="font-semibold">Grupo:</span> ${equipamento.grupo}</p>
+                <p class="text-sm text-gray-700 dark:text-gray-300"><span class="font-semibold">Modelo:</span> ${equipamento.modelo}</p>
+                <p class="text-sm text-gray-700 dark:text-gray-300"><span class="font-semibold">Código Atual:</span> ${equipamento.codigo || 'N/A'}</p>
+            </div>
+            <div class="mt-4">
+                ${infoHtml}
+                <form id="form-vincular-modal" class="mt-4 space-y-4">
+                    ${formHtml}
+                </form>
+            </div>
         </div>
     `;
 
-    // Botões de ação do modal (Vincular Rádio e Vincular Bordos têm submissões separadas)
+    // Botões de ação do modal
     actionsEl.innerHTML = `
         <button onclick="hideVincularModal()" class="px-3 py-1.5 text-sm bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 font-semibold rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors shadow-md">
             Fechar
@@ -844,7 +843,7 @@ function showVincularModal(equipamentoId, tipo) {
     modal.classList.remove('hidden');
     modal.classList.add('flex');
     
-    // Inicializa TomSelects no modal (após o HTML ser injetado)
+    // Inicializa TomSelects
     const initTomSelectInstance = (el) => {
         if (el) {
             new TomSelect(el, {
@@ -861,7 +860,6 @@ function showVincularModal(equipamentoId, tipo) {
     initTomSelectInstance(document.getElementById('modal-mag-id'));
     initTomSelectInstance(document.getElementById('modal-chip-id'));
     
-    // Lógica de Submissão do Modal
     const confirmBtn = document.getElementById('confirm-vincular-btn');
     if (confirmBtn) {
         confirmBtn.onclick = () => handleVincularSubmit(equipamentoId, tipo, registro);
@@ -5456,4 +5454,5 @@ window.addEventListener('appinstalled', () => {
 
 
 window.onload = initApp;
+
 

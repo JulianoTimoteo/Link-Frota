@@ -82,9 +82,9 @@ const TIPOS_BORDO = ['Tela', 'Mag', 'Chip'];
 const DEFAULT_LETTER_MAP = {
     Colheita: 'A',
     Transporte: 'B', 
-    Oficina: 'C',
+    Oficina: 'NUM',
     TPL: 'D',
-    Industria: 'NUM'
+    Industria: 'C'
 };
 const DEFAULT_NEXT_INDEX = { A: 1, B: 1, C: 1, D: 1, NUM: 1 };
 
@@ -2347,7 +2347,8 @@ function renderDashboard() {
     // Bordos
     const cardHtmlBordos = `
         <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-            ${_renderStatCard('Total Kits Bordo', totalBordos, 'fa-memory', 'bg-blue-600')}
+            ${_renderStatCard('Total Componentes', totalBordos, 'fa-memory', 'bg-blue-600')}
+            
             ${_renderStatCard('Kits em Uso', bordosEmUso, 'fa-microchip', 'bg-green-main')}
             
             ${_renderStatCard('Kits Disponíveis', kitsDisponiveis, 'fa-boxes', 'bg-sky-500')}
@@ -2409,7 +2410,7 @@ function renderDashboard() {
                 <div class="bg-white dark:bg-gray-800 rounded-xl shadow-xl p-6 border border-gray-200 dark:border-gray-700 futuristic-card">
                     <h3 class="text-xl font-semibold text-gray-800 dark:text-gray-100 mb-4 flex items-center">
                         <i class="fas fa-boxes mr-2 text-green-main"></i>	
-                        Equipamentos com Vínculo Ativo (Total: ${totalEquipamentos})
+                        Equipamentos com Vínculo Ativo - Total: ${totalEquipamentos}
                     </h3>
                     <div class="overflow-x-auto">
                         <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
@@ -2427,10 +2428,10 @@ function renderDashboard() {
                 </div>
                 
                 <div class="bg-white dark:bg-gray-800 rounded-xl shadow-xl p-6 border border-gray-200 dark:border-gray-700 futuristic-card">
-                    <h3 class="text-xl font-semibold text-gray-800 dark:text-gray-100 mb-4 flex items-center">
-                        <i class="fas fa-microchip mr-2 text-blue-500"></i>	
-                        Resumo de Componentes de Bordo (Total: ${activeBordos.length})
-                    </h3>
+                   <h3 class="text-xl font-semibold text-gray-800 dark:text-gray-100 mb-4 flex items-center">
+    <i class="fas fa-microchip mr-2 text-blue-500"></i>	
+    Resumo de Componentes de Bordo -Total Kits: ${totalBordos}
+</h3>
                     <div class="overflow-x-auto">
                         <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
                             <thead class="bg-blue-500/10 dark:bg-blue-500/30">
@@ -3668,9 +3669,8 @@ async function renderSettingsUsers() {
     settings.users = usersFromDB;		
 
     const tableRows = usersFromDB.map(u => {
-        
         const isMainAdmin = u.username === ADMIN_PRINCIPAL_EMAIL;
-        const isCurrent = currentUser && currentUser.email === u.username;
+        const isCurrent = currentUser.email === u.username;
         const canEditDelete = !isMainAdmin;
         
         const loginMethod = u.customUsername ? u.customUsername : u.username;

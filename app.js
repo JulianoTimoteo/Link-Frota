@@ -82,9 +82,9 @@ const TIPOS_BORDO = ['Tela', 'Mag', 'Chip'];
 const DEFAULT_LETTER_MAP = {
     Colheita: 'A',
     Transporte: 'B', 
-    Oficina: 'C',
+    Oficina: 'NUM',
     TPL: 'D',
-    Industria: 'NUM'
+    Industria: 'C'
 };
 const DEFAULT_NEXT_INDEX = { A: 1, B: 1, C: 1, D: 1, NUM: 1 };
 
@@ -1330,33 +1330,15 @@ async function saveUser(e) {
             await createUserWithEmailAndPassword(auth, finalEmail, password);
         } catch (e) {
             if (e.code === 'auth/email-already-in-use') {
-                // } catch (e) {
-    if (e.code === 'auth/email-already-in-use' || e.code === 'auth/invalid-credential') {
-        // ERRO DE DESSINCRONIZAÇÃO:
-        // O usuário foi apagado do banco (Firestore) mas ainda existe na Autenticação.
-        
-        const adminMessage = `
-            <b>Falha ao Sincronizar (Erro 400)</b><br><br>
-            <b>O que aconteceu:</b> O usuário <b>${finalEmail}</b> já existe no sistema de senhas (Authentication), mas não está na sua lista de usuários (Firestore).
-            <br><br>
-            <b>Próximo Procedimento (Obrigatório):</b>
-            <ol class="list-decimal list-inside mt-2 space-y-1">
-                <li>Acesse o <b>Console do Firebase</b>.</li>
-                <li>Vá para <b>Build > Authentication > Users</b>.</li>
-                <li>Encontre e <b>Exclua</b> o usuário <b>${finalEmail}</b>.</li>
-                <li>Volte ao app e cadastre-o novamente.</li>
-            </ol>
-        `;
-        showModal('Erro de Sincronia (Admin)', adminMessage, 'error');
-        return; // PARA a execução. O admin deve corrigir manualmente.
-
-    } else {
-        console.error(e);
-        // Outros erros (ex: rede, senha fraca)
-        showModal('Erro de Auth', `Não foi possível criar o login: ${e.message}`, 'error');
-        return; 
-    }
-}
+                // Se já existe, avisamos mas permitimos continuar (para sincronizar o banco)
+                showModal('Aviso', `O login ${finalEmail} já existe no Firebase Auth. O perfil local será apenas criado/sincronizado.`, 'warning');
+            } else {
+                console.error(e);
+                // Se der outro erro (ex: erro de rede), paramos TUDO. Não salva no banco.
+                showModal('Erro de Auth', `Não foi possível criar o login: ${e.message}`, 'error');
+                return; 
+            }
+        }
     }
 
     // 4. Preparação do Objeto para o Firestore
@@ -1477,29 +1459,17 @@ async function approveUser(pendingId, name, email, tempPassword) {
         await createUserWithEmailAndPassword(auth, email, tempPassword);
         authCreationSuccess = true;
     } catch (e) {
-    if (e.code === 'auth/email-already-in-use') {
-        // ERRO DE DESSINCRONIZAÇÃO:
-        const adminMessage = `
-            <b>Falha ao Sincronizar (Erro 400)</b><br><br>
-            <b>O que aconteceu:</b> O usuário <b>${email}</b> (da solicitação) já existe no sistema de senhas (Authentication), mas não está na lista de usuários.
-            <br><br>
-            <b>Próximo Procedimento (Obrigatório):</b>
-            <ol class="list-decimal list-inside mt-2 space-y-1">
-                <li>Acesse o <b>Console do Firebase</b>.</li>
-                <li>Vá para <b>Build > Authentication > Users</b>.</li>
-                <li>Encontre e <b>Exclua</b> o usuário <b>${email}</b>.</li>
-                <li>Volte ao app e aprove a solicitação novamente.</li>
-            </ol>
-        `;
-        showModal('Erro de Sincronia (Admin)', adminMessage, 'error');
-        return; // PARA a execução.
-
-    } else {
-        console.error("Erro ao criar no Auth:", e);
-        showModal('Erro Crítico', `O Firebase recusou a criação da senha: ${e.message}`, 'error');
-        return; // Aborta
+        if (e.code === 'auth/email-already-in-use') {
+            // Se já existe no Auth, permitimos continuar para criar apenas o registro no banco (Firestore)
+            // Isso corrige casos onde o usuário foi deletado do banco mas não do Auth
+            console.warn(`O email ${email} já existia no Auth. Prosseguindo para criar no Banco de Dados.`);
+            authCreationSuccess = true; 
+        } else {
+            console.error("Erro ao criar no Auth:", e);
+            showModal('Erro Crítico', `O Firebase recusou a criação da senha: ${e.message}`, 'error');
+            return; // Aborta tudo se não conseguir criar o login
+        }
     }
-}
 
     if (!authCreationSuccess) return;
 
@@ -5433,4 +5403,3 @@ window.hideVincularModal = hideVincularModal;
 // 🛑 handleDesvincularBordoIndividual NÃO É MAIS NECESSÁRIO como função separada no HTML
 // --- Inicialização do Sistema ---
 window.onload = initApp;
-}

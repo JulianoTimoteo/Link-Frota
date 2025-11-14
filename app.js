@@ -1455,7 +1455,6 @@ async function approveUser(pendingId, name, email, tempPassword) {
     }
 
     // --- ETAPA 1: SALVAR NO BANCO DE DADOS (COMO ADMIN) ---
-    // Fazemos isso PRIMEIRO, enquanto o Admin ainda está logado.
     try {
         const settingsDocRef = doc(db, "artifacts", appId, "public", "data", "settings", "config");
         const settingsSnap = await getDoc(settingsDocRef);
@@ -1469,7 +1468,7 @@ async function approveUser(pendingId, name, email, tempPassword) {
         
         if (!alreadyInDb) {
             const newUser = { 
-                id: crypto.randomUUID(), // Usaremos um ID temporário (o Auth terá o ID real)
+                id: crypto.randomUUID(), // ID temporário
                 name: name, 
                 username: email,
                 role: 'user',
@@ -1477,7 +1476,6 @@ async function approveUser(pendingId, name, email, tempPassword) {
             };
             currentUsers.push(newUser);
 
-            // Executa a gravação no banco e remove a pendência (Batch)
             const batch = writeBatch(db);
             batch.update(settingsDocRef, { users: currentUsers });
             
@@ -1486,39 +1484,31 @@ async function approveUser(pendingId, name, email, tempPassword) {
 
             await batch.commit();
             
-            // Atualiza a memória local
             settings.users = currentUsers;
         } else {
-            // Se já estava no banco, apenas remove a pendência
             await deleteDoc(doc(db, `artifacts/${appId}/public/data/pending_approvals`, pendingId));
             showModal('Aviso', 'O usuário já constava no banco de dados (Firestore). A pendência foi removida.', 'warning');
-            // Não precisamos criar o auth, pois ele provavelmente já existe (pela dessincronização)
-            return; // Importante sair
+            return; 
         }
         
     } catch (e) {
         console.error("Erro ao salvar dados no Firestore:", e);
-        // Se falhar aqui, é um erro de regras do Firestore
         showModal('Erro de Permissão', `Falha ao salvar no Firestore: ${e.message}. Verifique suas regras de segurança.`, 'error');
-        return; // PARA TUDO
+        return;
     }
 
     // --- ETAPA 2: CRIAR O LOGIN (AUTH) ---
-    // Se a Etapa 1 funcionou, agora criamos o login.
-    // Isso vai deslogar o admin, mas o banco de dados JÁ ESTÁ SALVO.
     try {
         await createUserWithEmailAndPassword(auth, email, tempPassword);
         
         hideModal();
         showModal('Sucesso', `Usuário <b>${name}</b> aprovado!<br>Login: ${email}<br>Senha: ${tempPassword}<br><br>Ele já pode logar.`, 'success');
-        // O app vai recarregar sozinho quando o admin for deslogado pelo onAuthStateChanged.
 
     } catch (e) {
-        // Se a Etapa 1 funcionou mas a Etapa 2 falhou (email já existe no Auth)
         if (e.code === 'auth/email-already-in-use') {
             const adminMessage = `
                 <b>Ação Necessária (Sincronia)</b><br><br>
-                <b>O que aconteceu:</b> O usuário <b>${email}</b> foi salvo na lista do app (Firestore), mas o login dele já existia no sistema de senhas (Auth).
+                <b>O que aconteceu:</b> O usuário <b>${email}</b> foi salvo na lista (Firestore), mas o login dele já existia no sistema de senhas (Auth).
                 <br><br>
                 <b>Resultado:</b> O usuário está APROVADO. Ele pode logar com a senha antiga.
             `;
@@ -5400,6 +5390,7 @@ window.hideVincularModal = hideVincularModal;
 // 🛑 handleDesvincularBordoIndividual NÃO É MAIS NECESSÁRIO como função separada no HTML
 // --- Inicialização do Sistema ---
 window.onload = initApp;
+
 
 
 

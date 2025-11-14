@@ -1458,100 +1458,130 @@ async function deleteUser(id) {
 
 // --- Funções de Gerenciamento de Pendências (Novo) ---
 
-async function approveUser(pendingId, name, email, tempPassword) {
-    if (!db || !appId || !currentUser || currentUser.role !== 'admin') {
-        showModal('Acesso Negado', 'Você não tem permissão ou conexão para realizar esta ação.', 'error');
+// 🩹 NOVO CÓDIGO para saveUser (Substitua a função inteira)
+async function saveUser(e) {
+    e.preventDefault();
+    const id = document.getElementById('user-id').value;
+    const name = document.getElementById('user-name').value.trim();
+    let email = document.getElementById('user-username').value.trim();
+    const customUsername = document.getElementById('user-custom-username').value.trim();
+    const password = document.getElementById('user-password').value;
+    const role = document.getElementById('user-role').value;
+
+    if (!name || !role) {
+        showModal('Erro', 'Nome Completo e Perfil são obrigatórios.', 'error');
         return;
     }
 
-    // 1. Tenta criar o Usuário no Firebase Authentication (Login real)
-    let authCreationSuccess = false;
-    try {
-        // Isso cria o usuário no painel "Authentication" do Firebase
-        await createUserWithEmailAndPassword(auth, email, tempPassword);
-        authCreationSuccess = true;
-    } catch (e) {
-    if (e.code === 'auth/email-already-in-use') {
-        const adminMessage = `
-            <b>Falha ao Sincronizar (Erro 400)</b><br><br>
-            <b>O que aconteceu:</b> O usuário <b>${email}</b> (da solicitação) já existe no sistema de senhas (Authentication), mas não está na lista de usuários.
-            <br><br>
-            <b>Próximo Procedimento (Obrigatório):</b>
-            <ol class="list-decimal list-inside mt-2 space-y-1">
-                <li>Acesse o <b>Console do Firebase</b>.</li>
-                <li>Vá para <b>Build > Authentication > Users</b>.</li>
-                <li>Encontre e <b>Exclua</b> o usuário <b>${email}</b>.</li>
-                <li>Volte ao app e aprove a solicitação novamente.</li>
-            </ol>
-        `;
-        showModal('Erro de Sincronia (Admin)', adminMessage, 'error');
-        return; // PARA a execução.
-
-    } else {
-        console.error("Erro ao criar no Auth:", e);
-        showModal('Erro Crítico', `O Firebase recusou a criação da senha: ${e.message}`, 'error');
-        return; // Aborta
+    let finalEmail = email;
+    if (customUsername && !finalEmail) {
+        finalEmail = createGenericEmail(customUsername, appId);
+    } else if (!finalEmail || !isEmail(finalEmail)) {
+        showModal('Erro', 'É necessário informar um Email válido ou um Nome de Usuário.', 'error');
+        return;
     }
-}
 
-    if (!authCreationSuccess) return;
+    const isEditing = !!id;
+    const usersFromDB = settings.users;
 
-    // 2. Se o login foi criado (ou já existia), agora salvamos os DADOS no Firestore
+    const isDuplicate = usersFromDB.some(u =>
+        (u.username === finalEmail || (customUsername && u.customUsername === customUsername)) &&
+        (!isEditing || u.id !== id)
+    );
+
+    if (isDuplicate) {
+        showModal('Erro', `Este usuário ou email (${finalEmail}) já está cadastrado no sistema.`, 'error');
+        return;
+    }
+
+    // --- ETAPA 1: SALVAR NO BANCO DE DADOS (COMO ADMIN) ---
+    // Movemos isso para ANTES de criar o Auth.
+    let userToSave;
+    if (isEditing) {
+        userToSave = usersFromDB.find(u => u.id === id);
+        if (!userToSave) {
+            showModal('Erro', 'Usuário original não encontrado.', 'error');
+            return;
+        }
+        userToSave.name = name;
+        userToSave.username = finalEmail;
+        userToSave.customUsername = customUsername;
+        userToSave.role = role;
+        if (password.length >= 6 && customUsername) {
+            userToSave.loginPassword = password;
+        }
+    } else {
+        // Modo Criação (Novo)
+        if (password.length < 6) {
+            showModal('Erro', 'A senha deve ter no mínimo 6 caracteres.', 'error');
+            return;
+        }
+        userToSave = {
+            id: crypto.randomUUID(), // ID temporário
+            name,
+            username: finalEmail,
+            customUsername,
+            role,
+            permissions: { dashboard: true, cadastro: true, pesquisa: true, settings: role === 'admin' }
+        };
+        if (customUsername) {
+            userToSave.loginPassword = password;
+        }
+        usersFromDB.push(userToSave);
+    }
+
     try {
-        // Recarrega a lista mais recente do banco para evitar sobrescrever dados de outros admins
         const settingsDocRef = doc(db, "artifacts", appId, "public", "data", "settings", "config");
-        const settingsSnap = await getDoc(settingsDocRef);
-        
-        let currentUsers = [];
-        if (settingsSnap.exists() && settingsSnap.data().users) {
-            currentUsers = settingsSnap.data().users;
-        }
-
-        // Verifica se já não existe na lista do banco para não duplicar visualmente
-        const alreadyInDb = currentUsers.some(u => u.username === email);
-        
-        if (!alreadyInDb) {
-            const newUser = { 
-                id: crypto.randomUUID(), 
-                name: name, 
-                username: email, // Este email deve bater com o Authentication
-                role: 'user', // Padrão: usuário comum
-                permissions: { dashboard: true, cadastro: true, pesquisa: true, settings: false }
-            };
-            
-            currentUsers.push(newUser);
-
-            // 3. Executa a gravação no banco e remove a pendência (Batch = Atômico)
-            const batch = writeBatch(db);
-            
-            // Atualiza lista de usuários
-            batch.update(settingsDocRef, { users: currentUsers });
-            
-            // Remove da lista de pendências
-            // [CORREÇÃO] Garante o caminho correto com seu appId
-            const pendingDocRef = doc(db, `artifacts/${appId}/public/data/pending_approvals`, pendingId);
-            batch.delete(pendingDocRef);
-
-            await batch.commit();
-            
-            // Atualiza a memória local
-            settings.users = currentUsers;
-            
-            hideModal();
-            showModal('Sucesso', `Usuário <b>${name}</b> aprovado!<br>Login: ${email}<br>Senha: ${tempPassword}<br><br>Ele já pode logar.`, 'success');
-            
-            // Atualiza a tela
-            renderApp();
-        } else {
-            // Se já estava no banco, apenas remove a pendência
-            await deleteDoc(doc(db, `artifacts/${appId}/public/data/pending_approvals`, pendingId));
-            showModal('Aviso', 'O usuário já constava no banco de dados. A pendência duplicada foi removida.', 'warning');
-            renderApp();
-        }
-
+        await setDoc(settingsDocRef, { users: usersFromDB }, { merge: true });
     } catch (e) {
-        console.error("Erro ao salvar dados no Firestore:", e);
-        showModal('Erro de Dados', 'O login foi criado, mas houve erro ao salvar os dados no sistema. Tente atualizar a página.', 'error');
+        console.error("Erro ao salvar no Firestore:", e);
+        // Este é o erro que você viu: "Missing or insufficient permissions"
+        showModal('Erro de Permissão', `Falha ao salvar no Firestore: ${e.message}. Verifique suas regras de segurança.`, 'error');
+        // Se falhou aqui, não tentamos criar o Auth.
+        return;
+    }
+
+    // --- ETAPA 2: CRIAR O LOGIN (AUTH) ---
+    // Apenas se for um NOVO usuário. Edição não mexe no Auth (só senha).
+    if (!isEditing) {
+        try {
+            await createUserWithEmailAndPassword(auth, finalEmail, password);
+        } catch (e) {
+            if (e.code === 'auth/email-already-in-use') {
+                const adminMessage = `
+                    <b>Ação Necessária (Sincronia)</b><br><br>
+                    <b>O que aconteceu:</b> O usuário <b>${finalEmail}</b> foi salvo na lista (Firestore), mas o login dele já existia no sistema de senhas (Auth).
+                    <br><br>
+                    <b>Resultado:</b> O usuário está APROVADO. Ele pode logar com a senha antiga. Se quiser resetar a senha, exclua-o do Console do Firebase (Authentication) e crie-o de novo.
+                `;
+                showModal('Aviso de Sincronia', adminMessage, 'warning');
+                // Não retornamos, pois o salvamento no Firestore já foi um sucesso.
+            } else {
+                console.error(e);
+                showModal('Erro de Auth', `O perfil foi salvo, mas a criação do login falhou: ${e.message}`, 'error');
+                // Não retornamos, o salvamento no DB foi ok.
+            }
+        }
+    }
+
+    // --- ETAPA 3: LIMPAR FORMULÁRIO ---
+    showModal('Sucesso', `Perfil de ${name} salvo com sucesso!`, 'success');
+    
+    // O app vai recarregar/deslogar se for um novo usuário.
+    // Se for uma edição, apenas renderiza de novo.
+    if (isEditing) {
+        renderApp();
+        setTimeout(() => {
+            const currentForm = document.getElementById('form-user');
+            if (currentForm) {
+                currentForm.reset();
+                document.getElementById('user-id').value = '';
+                const titleEl = document.getElementById('user-form-title');
+                if (titleEl) titleEl.textContent = 'Novo Perfil de Usuário';
+                const passField = document.getElementById('user-password-field');
+                if (passField) passField.classList.remove('hidden');
+            }
+        }, 100);
     }
 }
 
@@ -5426,5 +5456,6 @@ window.hideVincularModal = hideVincularModal;
 // 🛑 handleDesvincularBordoIndividual NÃO É MAIS NECESSÁRIO como função separada no HTML
 // --- Inicialização do Sistema ---
 window.onload = initApp;
+
 
 

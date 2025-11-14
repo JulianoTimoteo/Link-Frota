@@ -3668,8 +3668,9 @@ async function renderSettingsUsers() {
     settings.users = usersFromDB;		
 
     const tableRows = usersFromDB.map(u => {
+        
         const isMainAdmin = u.username === ADMIN_PRINCIPAL_EMAIL;
-        const isCurrent = currentUser.email === u.username;
+        const isCurrent = currentUser && currentUser.email === u.username;
         const canEditDelete = !isMainAdmin;
         
         const loginMethod = u.customUsername ? u.customUsername : u.username;

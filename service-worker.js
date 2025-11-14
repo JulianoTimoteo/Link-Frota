@@ -2,10 +2,11 @@ self.addEventListener('install', (e) => {
   e.waitUntil(
     caches.open('gestao-radios-v1').then((cache) => {
       return cache.addAll([
-        '/',
-        '/index.html',
-        '/app.js',
-        '/manifest.json'
+        './',
+        './index.html',
+        './app.js',
+        './style.css',
+        './manifest.json'
       ]);
     })
   );

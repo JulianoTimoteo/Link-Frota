@@ -1329,17 +1329,29 @@ async function saveUser(e) {
             // Tenta criar o login oficial no Authentication
             await createUserWithEmailAndPassword(auth, finalEmail, password);
         } catch (e) {
-            if (e.code === 'auth/email-already-in-use') {
-                // Se já existe, avisamos mas permitimos continuar (para sincronizar o banco)
-                showModal('Aviso', `O login ${finalEmail} já existe no Firebase Auth. O perfil local será apenas criado/sincronizado.`, 'warning');
-            } else {
-                console.error(e);
-                // Se der outro erro (ex: erro de rede), paramos TUDO. Não salva no banco.
-                showModal('Erro de Auth', `Não foi possível criar o login: ${e.message}`, 'error');
-                return; 
-            }
-        }
+    if (e.code === 'auth/email-already-in-use' || e.code === 'auth/invalid-credential') {
+        const adminMessage = `
+            <b>Falha ao Sincronizar (Erro 400)</b><br><br>
+            <b>O que aconteceu:</b> O usuário <b>${finalEmail}</b> já existe no sistema de senhas (Authentication), mas não está na sua lista de usuários (Firestore).
+            <br><br>
+            <b>Próximo Procedimento (Obrigatório):</b>
+            <ol class="list-decimal list-inside mt-2 space-y-1">
+                <li>Acesse o <b>Console do Firebase</b>.</li>
+                <li>Vá para <b>Build > Authentication > Users</b>.</li>
+                <li>Encontre e <b>Exclua</b> o usuário <b>${finalEmail}</b>.</li>
+                <li>Volte ao app e cadastre-o novamente.</li>
+            </ol>
+        `;
+        showModal('Erro de Sincronia (Admin)', adminMessage, 'error');
+        return; // PARA a execução.
+
+    } else {
+        console.error(e);
+        showModal('Erro de Auth', `Não foi possível criar o login: ${e.message}`, 'error');
+        return; 
     }
+  }
+}
 
     // 4. Preparação do Objeto para o Firestore
     let userToSave;
@@ -1459,17 +1471,28 @@ async function approveUser(pendingId, name, email, tempPassword) {
         await createUserWithEmailAndPassword(auth, email, tempPassword);
         authCreationSuccess = true;
     } catch (e) {
-        if (e.code === 'auth/email-already-in-use') {
-            // Se já existe no Auth, permitimos continuar para criar apenas o registro no banco (Firestore)
-            // Isso corrige casos onde o usuário foi deletado do banco mas não do Auth
-            console.warn(`O email ${email} já existia no Auth. Prosseguindo para criar no Banco de Dados.`);
-            authCreationSuccess = true; 
-        } else {
-            console.error("Erro ao criar no Auth:", e);
-            showModal('Erro Crítico', `O Firebase recusou a criação da senha: ${e.message}`, 'error');
-            return; // Aborta tudo se não conseguir criar o login
-        }
+    if (e.code === 'auth/email-already-in-use') {
+        const adminMessage = `
+            <b>Falha ao Sincronizar (Erro 400)</b><br><br>
+            <b>O que aconteceu:</b> O usuário <b>${email}</b> (da solicitação) já existe no sistema de senhas (Authentication), mas não está na lista de usuários.
+            <br><br>
+            <b>Próximo Procedimento (Obrigatório):</b>
+            <ol class="list-decimal list-inside mt-2 space-y-1">
+                <li>Acesse o <b>Console do Firebase</b>.</li>
+                <li>Vá para <b>Build > Authentication > Users</b>.</li>
+                <li>Encontre e <b>Exclua</b> o usuário <b>${email}</b>.</li>
+                <li>Volte ao app e aprove a solicitação novamente.</li>
+            </ol>
+        `;
+        showModal('Erro de Sincronia (Admin)', adminMessage, 'error');
+        return; // PARA a execução.
+
+    } else {
+        console.error("Erro ao criar no Auth:", e);
+        showModal('Erro Crítico', `O Firebase recusou a criação da senha: ${e.message}`, 'error');
+        return; // Aborta
     }
+}
 
     if (!authCreationSuccess) return;
 
@@ -5403,4 +5426,5 @@ window.hideVincularModal = hideVincularModal;
 // 🛑 handleDesvincularBordoIndividual NÃO É MAIS NECESSÁRIO como função separada no HTML
 // --- Inicialização do Sistema ---
 window.onload = initApp;
+
 

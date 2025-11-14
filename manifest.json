@@ -1,7 +1,7 @@
 {
   "name": "Gestão de Rádios e Bordos",
   "short_name": "GestãoRádios",
-  "start_url": "/index.html#dashboard",
+  "start_url": "./index.html#dashboard",
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#008000",

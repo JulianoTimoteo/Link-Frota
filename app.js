@@ -11,6 +11,7 @@ import {
     reauthenticateWithCredential,
     EmailAuthProvider
 } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+// app.js (Linha 28 aprox.)
 import { 
     getFirestore, 
     doc, 
@@ -26,9 +27,11 @@ import {
     setLogLevel,
     // NOVOS IMPORTS
     getDocs, 
-    where
+    where,
+    // --- ADICIONE ESTAS DUAS LINHAS ---
+    arrayUnion,
+    arrayRemove
 } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-
 // --- Configuração e Variáveis Globais do Firebase ---
 let app, auth, db;
 
@@ -1412,18 +1415,21 @@ async function saveUser(e) {
     }
 }
 
+// app.js (Substituir a partir da linha 1386)
 async function deleteUser(id) {
     const settingsDocRef = doc(db, "artifacts", appId, "public", "data", "settings", "config");
-    let usersFromDB = settings.users;
-    const userIndex = usersFromDB.findIndex(u => u.id === id);
     
-    if (userIndex === -1) {
+    // 1. Precisamos encontrar o objeto EXATO do usuário para o arrayRemove
+    // (Usamos a lista local 'settings.users' que está em memória para isso)
+    const userToDelete = settings.users.find(u => u.id === id);
+    
+    if (!userToDelete) {
         showModal('Erro', 'Usuário não encontrado para exclusão.', 'error');
         return;
     }
 
-    const userName = usersFromDB[userIndex].name;
-    const userUsername = usersFromDB[userIndex].username;
+    const userName = userToDelete.name;
+    const userUsername = userToDelete.username;
 
     // Bloqueia exclusão do admin principal
     if (userUsername === ADMIN_PRINCIPAL_EMAIL) {
@@ -1431,14 +1437,19 @@ async function deleteUser(id) {
         return;
     }
     
-    usersFromDB.splice(userIndex, 1); // Remove o usuário
-    
     try {
-        // Salva a lista completa (sem o usuário removido) no Firestore
-        await setDoc(settingsDocRef, { users: usersFromDB }, { merge: true });
+        // --- AQUI ESTÁ A CORREÇÃO DEFINITIVA ---
+        // Em vez de 'setDoc' com a lista modificada...
+        // ...usamos 'updateDoc' com 'arrayRemove'.
+        await updateDoc(settingsDocRef, {
+            users: arrayRemove(userToDelete)
+        });
+
+        // Atualiza a memória local (só depois que o banco confirmou)
+        settings.users = settings.users.filter(u => u.id !== id);
+
         showModal('Sucesso', `Perfil de ${userName} excluído com sucesso!`, 'success');
-        // NOTA: A exclusão do usuário do Firebase Auth deve ser feita manualmente pelo Admin via Console, por segurança.
-        renderApp(); 
+        renderApp(); 
     } catch (e) {
         showModal('Erro', 'Não foi possível excluir o perfil no banco de dados.', 'error');
     }
@@ -1453,17 +1464,11 @@ async function approveUser(pendingId, name, email, tempPassword) {
     }
 
     // 1. Tenta criar o Usuário no Firebase Authentication (Login real)
-    let authCreationSuccess = false;
     try {
-        // Isso cria o usuário no painel "Authentication" do Firebase
         await createUserWithEmailAndPassword(auth, email, tempPassword);
-        authCreationSuccess = true;
     } catch (e) {
         if (e.code === 'auth/email-already-in-use') {
-            // Se já existe no Auth, permitimos continuar para criar apenas o registro no banco (Firestore)
-            // Isso corrige casos onde o usuário foi deletado do banco mas não do Auth
             console.warn(`O email ${email} já existia no Auth. Prosseguindo para criar no Banco de Dados.`);
-            authCreationSuccess = true; 
         } else {
             console.error("Erro ao criar no Auth:", e);
             showModal('Erro Crítico', `O Firebase recusou a criação da senha: ${e.message}`, 'error');
@@ -1471,62 +1476,48 @@ async function approveUser(pendingId, name, email, tempPassword) {
         }
     }
 
-    if (!authCreationSuccess) return;
-
     // 2. Se o login foi criado (ou já existia), agora salvamos os DADOS no Firestore
     try {
-        // Recarrega a lista mais recente do banco para evitar sobrescrever dados de outros admins
         const settingsDocRef = doc(db, "artifacts", appId, "public", "data", "settings", "config");
-        const settingsSnap = await getDoc(settingsDocRef);
+
+        // Define o novo usuário que queremos ADICIONAR
+        const newUser = { 
+            id: crypto.randomUUID(), 
+            name: name, 
+            username: email, // Este email deve bater com o Authentication
+            role: 'user', // Padrão: usuário comum
+            permissions: { dashboard: true, cadastro: true, pesquisa: true, settings: false }
+        };
+
+        // 3. Executa a gravação no banco e remove a pendência (Batch = Atômico)
+        const batch = writeBatch(db);
         
-        let currentUsers = [];
-        if (settingsSnap.exists() && settingsSnap.data().users) {
-            currentUsers = settingsSnap.data().users;
-        }
-
-        // Verifica se já não existe na lista do banco para não duplicar visualmente
-        const alreadyInDb = currentUsers.some(u => u.username === email);
+        // --- AQUI ESTÁ A CORREÇÃO DEFINITIVA ---
+        // Em vez de 'update' com a lista lida (arriscada), usamos 'arrayUnion'.
+        // Isso adiciona atomicamente o 'newUser' ao array 'users' no banco.
+        // Usamos set com merge:true para criar o doc 'settings' se ele não existir.
+        batch.set(settingsDocRef, { 
+            users: arrayUnion(newUser) 
+        }, { merge: true });
         
-        if (!alreadyInDb) {
-            const newUser = { 
-                id: crypto.randomUUID(), 
-                name: name, 
-                username: email, // Este email deve bater com o Authentication
-                role: 'user', // Padrão: usuário comum
-                permissions: { dashboard: true, cadastro: true, pesquisa: true, settings: false }
-            };
-            
-            currentUsers.push(newUser);
+        // Remove da lista de pendências
+        const pendingDocRef = doc(db, `artifacts/${appId}/public/data/pending_approvals`, pendingId);
+        batch.delete(pendingDocRef);
 
-            // 3. Executa a gravação no banco e remove a pendência (Batch = Atômico)
-            const batch = writeBatch(db);
-            
-            // Atualiza lista de usuários
-            batch.update(settingsDocRef, { users: currentUsers });
-            
-            // Remove da lista de pendências
-            // [CORREÇÃO] Garante o caminho correto com seu appId
-            const pendingDocRef = doc(db, `artifacts/${appId}/public/data/pending_approvals`, pendingId);
-            batch.delete(pendingDocRef);
-
-            await batch.commit();
-            
-            // Atualiza a memória local
-            settings.users = currentUsers;
-            
-            hideModal();
-            showModal('Sucesso', `Usuário <b>${name}</b> aprovado!<br>Login: ${email}<br>Senha: ${tempPassword}<br><br>Ele já pode logar.`, 'success');
-            
-            // Atualiza a tela
-            renderApp();
-        } else {
-            // Se já estava no banco, apenas remove a pendência
-            await deleteDoc(doc(db, `artifacts/${appId}/public/data/pending_approvals`, pendingId));
-            showModal('Aviso', 'O usuário já constava no banco de dados. A pendência duplicada foi removida.', 'warning');
-            renderApp();
-        }
+        await batch.commit();
+        
+        // Atualiza a memória local (agora precisamos recarregar as settings)
+        // A forma mais segura é forçar um reload das settings locais:
+        await loadInitialSettings(); 
+        
+        hideModal();
+        showModal('Sucesso', `Usuário <b>${name}</b> aprovado!<br>Login: ${email}<br>Senha: ${tempPassword}<br><br>Ele já pode logar.`, 'success');
+        
+        // Atualiza a tela
+        renderApp();
 
     } catch (e) {
+        // ... (O restante do seu catch de erro)
         console.error("Erro ao salvar dados no Firestore:", e);
         showModal('Erro de Dados', 'O login foi criado, mas houve erro ao salvar os dados no sistema. Tente atualizar a página.', 'error');
     }

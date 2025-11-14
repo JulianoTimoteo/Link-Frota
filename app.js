@@ -1446,9 +1446,92 @@ async function deleteUser(id) {
 
 // --- Funções de Gerenciamento de Pendências (Novo) ---
 
- showModal('Erro de Dados', errorMessage, 'error');
+async function approveUser(pendingId, name, email, tempPassword) {
+    if (!db || !appId || !currentUser || currentUser.role !== 'admin') {
+        showModal('Acesso Negado', 'Você não tem permissão ou conexão para realizar esta ação.', 'error');
+        return;
+    }
+
+    // 1. Tenta criar o Usuário no Firebase Authentication (Login real)
+    let authCreationSuccess = false;
+    try {
+        // Isso cria o usuário no painel "Authentication" do Firebase
+        await createUserWithEmailAndPassword(auth, email, tempPassword);
+        authCreationSuccess = true;
+    } catch (e) {
+        if (e.code === 'auth/email-already-in-use') {
+            // Se já existe no Auth, permitimos continuar para criar apenas o registro no banco (Firestore)
+            // Isso corrige casos onde o usuário foi deletado do banco mas não do Auth
+            console.warn(`O email ${email} já existia no Auth. Prosseguindo para criar no Banco de Dados.`);
+            authCreationSuccess = true; 
+        } else {
+            console.error("Erro ao criar no Auth:", e);
+            showModal('Erro Crítico', `O Firebase recusou a criação da senha: ${e.message}`, 'error');
+            return; // Aborta tudo se não conseguir criar o login
+        }
+    }
+
+    if (!authCreationSuccess) return;
+
+    // 2. Se o login foi criado (ou já existia), agora salvamos os DADOS no Firestore
+    try {
+        // Recarrega a lista mais recente do banco para evitar sobrescrever dados de outros admins
+        const settingsDocRef = doc(db, "artifacts", appId, "public", "data", "settings", "config");
+        const settingsSnap = await getDoc(settingsDocRef);
+        
+        let currentUsers = [];
+        if (settingsSnap.exists() && settingsSnap.data().users) {
+            currentUsers = settingsSnap.data().users;
+        }
+
+        // Verifica se já não existe na lista do banco para não duplicar visualmente
+        const alreadyInDb = currentUsers.some(u => u.username === email);
+        
+        if (!alreadyInDb) {
+            const newUser = { 
+                id: crypto.randomUUID(), 
+                name: name, 
+                username: email, // Este email deve bater com o Authentication
+                role: 'user', // Padrão: usuário comum
+                permissions: { dashboard: true, cadastro: true, pesquisa: true, settings: false }
+            };
+            
+            currentUsers.push(newUser);
+
+            // 3. Executa a gravação no banco e remove a pendência (Batch = Atômico)
+            const batch = writeBatch(db);
+            
+            // Atualiza lista de usuários
+            batch.update(settingsDocRef, { users: currentUsers });
+            
+            // Remove da lista de pendências
+            // [CORREÇÃO] Garante o caminho correto com seu appId
+            const pendingDocRef = doc(db, `artifacts/${appId}/public/data/pending_approvals`, pendingId);
+            batch.delete(pendingDocRef);
+
+            await batch.commit();
+            
+            // Atualiza a memória local
+            settings.users = currentUsers;
+            
+            hideModal();
+            showModal('Sucesso', `Usuário <b>${name}</b> aprovado!<br>Login: ${email}<br>Senha: ${tempPassword}<br><br>Ele já pode logar.`, 'success');
+            
+            // Atualiza a tela
+            renderApp();
+        } else {
+            // Se já estava no banco, apenas remove a pendência
+            await deleteDoc(doc(db, `artifacts/${appId}/public/data/pending_approvals`, pendingId));
+            showModal('Aviso', 'O usuário já constava no banco de dados. A pendência duplicada foi removida.', 'warning');
+            renderApp();
+        }
+
+    } catch (e) {
+        console.error("Erro ao salvar dados no Firestore:", e);
+        showModal('Erro de Dados', 'O login foi criado, mas houve erro ao salvar os dados no sistema. Tente atualizar a página.', 'error');
     }
 }
+
 // NOVO: Função para solicitar acesso
 async function handleSolicitarAcesso(e) {
     e.preventDefault();
@@ -5320,4 +5403,3 @@ window.hideVincularModal = hideVincularModal;
 // 🛑 handleDesvincularBordoIndividual NÃO É MAIS NECESSÁRIO como função separada no HTML
 // --- Inicialização do Sistema ---
 window.onload = initApp;
-

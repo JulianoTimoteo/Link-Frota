@@ -82,9 +82,9 @@ const TIPOS_BORDO = ['Tela', 'Mag', 'Chip'];
 const DEFAULT_LETTER_MAP = {
     Colheita: 'A',
     Transporte: 'B', 
-    Oficina: 'C',   // <-- Correto
+    Oficina: 'NUM',
     TPL: 'D',
-    Industria: 'NUM' // <-- Correto
+    Industria: 'C'
 };
 const DEFAULT_NEXT_INDEX = { A: 1, B: 1, C: 1, D: 1, NUM: 1 };
 
@@ -1270,77 +1270,76 @@ function loadUserForEdit(id) {
     }
 }
 
-async function approveUser(pendingId, name, email, tempPassword) {
-    if (!db || !appId || !currentUser || currentUser.role !== 'admin') {
-        showModal('Acesso Negado', 'Você não tem permissão ou conexão para realizar esta ação.', 'error');
+async function saveUser(e) {
+    e.preventDefault();
+    const id = document.getElementById('user-id').value;
+    const name = document.getElementById('user-name').value.trim();
+    let email = document.getElementById('user-username').value.trim(); // Email
+    const customUsername = document.getElementById('user-custom-username').value.trim(); // Nome de usuário
+    const password = document.getElementById('user-password').value; // Senha
+    const role = document.getElementById('user-role').value;
+    
+    // Validação básica de campos obrigatórios
+    if (!name || !role) {
+        showModal('Erro', 'Nome Completo e Perfil são obrigatórios.', 'error');
         return;
     }
 
-    // --- ETAPA 1: SALVAR NO BANCO DE DADOS (COMO ADMIN) ---
-    try {
-        const settingsDocRef = doc(db, "artifacts", appId, "public", "data", "settings", "config");
-        const settingsSnap = await getDoc(settingsDocRef);
-        
-        let currentUsers = [];
-        if (settingsSnap.exists() && settingsSnap.data().users) {
-            currentUsers = settingsSnap.data().users;
+    // 1. Definição do Email de Login (Real ou Genérico)
+    // Se usou Nome de Usuário, criamos um email "fake" para o Firebase aceitar
+    let finalEmail = email;
+    
+    if (customUsername) {
+        if (!finalEmail) {
+            // Função auxiliar que já existe no seu código
+            finalEmail = createGenericEmail(customUsername, appId);
         }
-
-        const alreadyInDb = currentUsers.some(u => u.username === email);
-        
-        if (!alreadyInDb) {
-            const newUser = { 
-                id: crypto.randomUUID(), // ID temporário
-                name: name, 
-                username: email,
-                role: 'user',
-                permissions: { dashboard: true, cadastro: true, pesquisa: true, settings: false }
-            };
-            currentUsers.push(newUser);
-
-            const batch = writeBatch(db);
-            batch.update(settingsDocRef, { users: currentUsers });
-            
-            const pendingDocRef = doc(db, `artifacts/${appId}/public/data/pending_approvals`, pendingId);
-            batch.delete(pendingDocRef);
-
-            await batch.commit();
-            
-            settings.users = currentUsers;
-        } else {
-            await deleteDoc(doc(db, `artifacts/${appId}/public/data/pending_approvals`, pendingId));
-            showModal('Aviso', 'O usuário já constava no banco de dados (Firestore). A pendência foi removida.', 'warning');
-            return; 
+    } else {
+        // Se NÃO usou Nome de Usuário, o email é obrigatório e deve ser válido
+        if (!finalEmail || !isEmail(finalEmail)) {
+            showModal('Erro', 'É necessário informar um Email válido ou um Nome de Usuário.', 'error');
+            return;
         }
-        
-    } catch (e) {
-        console.error("Erro ao salvar dados no Firestore:", e);
-        showModal('Erro de Permissão', `Falha ao salvar no Firestore: ${e.message}. Verifique suas regras de segurança.`, 'error');
+    }
+
+    const isEditing = !!id;
+    const usersFromDB = settings.users; // Referência local atual
+
+    // 2. Checagem de duplicidade na lista local antes de ir pro servidor
+    // Verifica se o email ou o nome de usuário já existem em outro ID
+    const isDuplicate = usersFromDB.some(u => 
+        (u.username === finalEmail || (customUsername && u.customUsername === customUsername)) && 
+        (!isEditing || u.id !== id)
+    );
+
+    if (isDuplicate) {
+        showModal('Erro', `Este usuário ou email (${finalEmail}) já está cadastrado no sistema.`, 'error');
         return;
     }
 
-    // --- ETAPA 2: CRIAR O LOGIN (AUTH) ---
-    try {
-        await createUserWithEmailAndPassword(auth, email, tempPassword);
-        
-        hideModal();
-        showModal('Sucesso', `Usuário <b>${name}</b> aprovado!<br>Login: ${email}<br>Senha: ${tempPassword}<br><br>Ele já pode logar.`, 'success');
+    // 3. CRIAÇÃO NO FIREBASE AUTH (O Passo Crucial)
+    // Se for um NOVO usuário, tentamos criar o login no Firebase antes de salvar no banco
+    if (!isEditing) {
+        if (password.length < 6) {
+            showModal('Erro', 'A senha deve ter no mínimo 6 caracteres.', 'error');
+            return;
+        }
 
-    } catch (e) {
-        if (e.code === 'auth/email-already-in-use') {
-            const adminMessage = `
-                <b>Ação Necessária (Sincronia)</b><br><br>
-                <b>O que aconteceu:</b> O usuário <b>${email}</b> foi salvo na lista (Firestore), mas o login dele já existia no sistema de senhas (Auth).
-                <br><br>
-                <b>Resultado:</b> O usuário está APROVADO. Ele pode logar com a senha antiga.
-            `;
-            showModal('Aviso de Sincronia', adminMessage, 'warning');
-        } else {
-            console.error("Erro ao criar no Auth:", e);
-            showModal('Erro Crítico no Auth', `O Firebase recusou a criação da senha: ${e.message}`, 'error');
+        try {
+            // Tenta criar o login oficial no Authentication
+            await createUserWithEmailAndPassword(auth, finalEmail, password);
+        } catch (e) {
+            if (e.code === 'auth/email-already-in-use') {
+                // Se já existe, avisamos mas permitimos continuar (para sincronizar o banco)
+                showModal('Aviso', `O login ${finalEmail} já existe no Firebase Auth. O perfil local será apenas criado/sincronizado.`, 'warning');
+            } else {
+                console.error(e);
+                // Se der outro erro (ex: erro de rede), paramos TUDO. Não salva no banco.
+                showModal('Erro de Auth', `Não foi possível criar o login: ${e.message}`, 'error');
+                return; 
+            }
         }
     }
-}
 
     // 4. Preparação do Objeto para o Firestore
     let userToSave;
@@ -1447,15 +1446,36 @@ async function deleteUser(id) {
 
 // --- Funções de Gerenciamento de Pendências (Novo) ---
 
-// 🩹 NOVO CÓDIGO para saveUser (Substitua a função inteira)
 async function approveUser(pendingId, name, email, tempPassword) {
     if (!db || !appId || !currentUser || currentUser.role !== 'admin') {
         showModal('Acesso Negado', 'Você não tem permissão ou conexão para realizar esta ação.', 'error');
         return;
     }
 
-    // --- ETAPA 1: SALVAR NO BANCO DE DADOS (COMO ADMIN) ---
+    // 1. Tenta criar o Usuário no Firebase Authentication (Login real)
+    let authCreationSuccess = false;
     try {
+        // Isso cria o usuário no painel "Authentication" do Firebase
+        await createUserWithEmailAndPassword(auth, email, tempPassword);
+        authCreationSuccess = true;
+    } catch (e) {
+        if (e.code === 'auth/email-already-in-use') {
+            // Se já existe no Auth, permitimos continuar para criar apenas o registro no banco (Firestore)
+            // Isso corrige casos onde o usuário foi deletado do banco mas não do Auth
+            console.warn(`O email ${email} já existia no Auth. Prosseguindo para criar no Banco de Dados.`);
+            authCreationSuccess = true; 
+        } else {
+            console.error("Erro ao criar no Auth:", e);
+            showModal('Erro Crítico', `O Firebase recusou a criação da senha: ${e.message}`, 'error');
+            return; // Aborta tudo se não conseguir criar o login
+        }
+    }
+
+    if (!authCreationSuccess) return;
+
+    // 2. Se o login foi criado (ou já existia), agora salvamos os DADOS no Firestore
+    try {
+        // Recarrega a lista mais recente do banco para evitar sobrescrever dados de outros admins
         const settingsDocRef = doc(db, "artifacts", appId, "public", "data", "settings", "config");
         const settingsSnap = await getDoc(settingsDocRef);
         
@@ -1464,61 +1484,54 @@ async function approveUser(pendingId, name, email, tempPassword) {
             currentUsers = settingsSnap.data().users;
         }
 
+        // Verifica se já não existe na lista do banco para não duplicar visualmente
         const alreadyInDb = currentUsers.some(u => u.username === email);
         
         if (!alreadyInDb) {
             const newUser = { 
-                id: crypto.randomUUID(), // ID temporário
+                id: crypto.randomUUID(), 
                 name: name, 
-                username: email,
-                role: 'user',
+                username: email, // Este email deve bater com o Authentication
+                role: 'user', // Padrão: usuário comum
                 permissions: { dashboard: true, cadastro: true, pesquisa: true, settings: false }
             };
+            
             currentUsers.push(newUser);
 
+            // 3. Executa a gravação no banco e remove a pendência (Batch = Atômico)
             const batch = writeBatch(db);
+            
+            // Atualiza lista de usuários
             batch.update(settingsDocRef, { users: currentUsers });
             
+            // Remove da lista de pendências
+            // [CORREÇÃO] Garante o caminho correto com seu appId
             const pendingDocRef = doc(db, `artifacts/${appId}/public/data/pending_approvals`, pendingId);
             batch.delete(pendingDocRef);
 
             await batch.commit();
             
+            // Atualiza a memória local
             settings.users = currentUsers;
+            
+            hideModal();
+            showModal('Sucesso', `Usuário <b>${name}</b> aprovado!<br>Login: ${email}<br>Senha: ${tempPassword}<br><br>Ele já pode logar.`, 'success');
+            
+            // Atualiza a tela
+            renderApp();
         } else {
+            // Se já estava no banco, apenas remove a pendência
             await deleteDoc(doc(db, `artifacts/${appId}/public/data/pending_approvals`, pendingId));
-            showModal('Aviso', 'O usuário já constava no banco de dados (Firestore). A pendência foi removida.', 'warning');
-            return; 
+            showModal('Aviso', 'O usuário já constava no banco de dados. A pendência duplicada foi removida.', 'warning');
+            renderApp();
         }
-        
+
     } catch (e) {
         console.error("Erro ao salvar dados no Firestore:", e);
-        showModal('Erro de Permissão', `Falha ao salvar no Firestore: ${e.message}. Verifique suas regras de segurança.`, 'error');
-        return;
-    }
-
-    // --- ETAPA 2: CRIAR O LOGIN (AUTH) ---
-    try {
-        await createUserWithEmailAndPassword(auth, email, tempPassword);
-        
-        hideModal();
-        showModal('Sucesso', `Usuário <b>${name}</b> aprovado!<br>Login: ${email}<br>Senha: ${tempPassword}<br><br>Ele já pode logar.`, 'success');
-
-    } catch (e) {
-        if (e.code === 'auth/email-already-in-use') {
-            const adminMessage = `
-                <b>Ação Necessária (Sincronia)</b><br><br>
-                <b>O que aconteceu:</b> O usuário <b>${email}</b> foi salvo na lista (Firestore), mas o login dele já existia no sistema de senhas (Auth).
-                <br><br>
-                <b>Resultado:</b> O usuário está APROVADO. Ele pode logar com a senha antiga.
-            `;
-            showModal('Aviso de Sincronia', adminMessage, 'warning');
-        } else {
-            console.error("Erro ao criar no Auth:", e);
-            showModal('Erro Crítico no Auth', `O Firebase recusou a criação da senha: ${e.message}`, 'error');
-        }
+        showModal('Erro de Dados', 'O login foi criado, mas houve erro ao salvar os dados no sistema. Tente atualizar a página.', 'error');
     }
 }
+
 // NOVO: Função para solicitar acesso
 async function handleSolicitarAcesso(e) {
     e.preventDefault();
@@ -3657,7 +3670,7 @@ async function renderSettingsUsers() {
     const tableRows = usersFromDB.map(u => {
         
         const isMainAdmin = u.username === ADMIN_PRINCIPAL_EMAIL;
-const isCurrent = currentUser && currentUser.email === u.username;
+        const isCurrent = currentUser && currentUser.email === u.username;
         const canEditDelete = !isMainAdmin;
         
         const loginMethod = u.customUsername ? u.customUsername : u.username;
@@ -5390,9 +5403,3 @@ window.hideVincularModal = hideVincularModal;
 // 🛑 handleDesvincularBordoIndividual NÃO É MAIS NECESSÁRIO como função separada no HTML
 // --- Inicialização do Sistema ---
 window.onload = initApp;
-
-
-
-
-
-

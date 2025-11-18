@@ -1385,14 +1385,44 @@ async function saveUser(e) {
         usersFromDB.push(userToSave);
     }
 
-    // 5. Gravação no Banco de Dados (Firestore)
-    try {
+    // 5. try {
         const settingsDocRef = doc(db, "artifacts", appId, "public", "data", "settings", "config");
-        // Salva a lista inteira atualizada
-        await setDoc(settingsDocRef, { users: usersFromDB }, { merge: true });
 
-        showModal('Sucesso', `Perfil de ${name} salvo com sucesso! Login ativo.`, 'success');
-        
+        if (isEditing) {
+            // --- MODO EDIÇÃO ---
+            // Para não apagar outros, baixamos a lista atualizada do banco primeiro
+            const snap = await getDoc(settingsDocRef);
+            let currentUsers = snap.exists() ? snap.data().users || [] : [];
+
+            // Encontra e substitui o usuário na lista fresca do servidor
+            const idx = currentUsers.findIndex(u => u.id === id);
+            if (idx !== -1) {
+                currentUsers[idx] = userToSave;
+            } else {
+                // Se não achou (caso raro), adiciona
+                currentUsers.push(userToSave);
+            }
+
+            // Salva a lista atualizada e segura
+            await setDoc(settingsDocRef, { users: currentUsers }, { merge: true });
+            
+            // Atualiza a memória local para refletir na tela
+            settings.users = currentUsers;
+
+        } else {
+            // --- MODO CRIAÇÃO (NOVO) ---
+            // Usamos arrayUnion: Isso adiciona APENAS o novo usuário, sem tocar nos antigos
+            // É a forma mais segura contra apagamentos acidentais.
+            await setDoc(settingsDocRef, {
+                users: arrayUnion(userToSave)
+            }, { merge: true });
+
+            // Atualiza a lista local manualmente para ver o novo usuário sem precisar recarregar
+            // (Verifica se já não foi adicionado antes para evitar duplicidade visual)
+            if (!settings.users.some(u => u.id === userToSave.id)) {
+                settings.users.push(userToSave);
+            }
+        }
         // Atualiza a tela e limpa o formulário
         renderApp();
         
@@ -5394,4 +5424,5 @@ window.hideVincularModal = hideVincularModal;
 // 🛑 handleDesvincularBordoIndividual NÃO É MAIS NECESSÁRIO como função separada no HTML
 // --- Inicialização do Sistema ---
 window.onload = initApp;
+
 

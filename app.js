@@ -1277,28 +1277,22 @@ async function saveUser(e) {
     e.preventDefault();
     const id = document.getElementById('user-id').value;
     const name = document.getElementById('user-name').value.trim();
-    let email = document.getElementById('user-username').value.trim(); // Email
-    const customUsername = document.getElementById('user-custom-username').value.trim(); // Nome de usuário
-    const password = document.getElementById('user-password').value; // Senha
+    let email = document.getElementById('user-username').value.trim();
+    const customUsername = document.getElementById('user-custom-username').value.trim();
+    const password = document.getElementById('user-password').value;
     const role = document.getElementById('user-role').value;
     
-    // Validação básica de campos obrigatórios
     if (!name || !role) {
         showModal('Erro', 'Nome Completo e Perfil são obrigatórios.', 'error');
         return;
     }
 
-    // 1. Definição do Email de Login (Real ou Genérico)
-    // Se usou Nome de Usuário, criamos um email "fake" para o Firebase aceitar
     let finalEmail = email;
-    
     if (customUsername) {
         if (!finalEmail) {
-            // Função auxiliar que já existe no seu código
             finalEmail = createGenericEmail(customUsername, appId);
         }
     } else {
-        // Se NÃO usou Nome de Usuário, o email é obrigatório e deve ser válido
         if (!finalEmail || !isEmail(finalEmail)) {
             showModal('Erro', 'É necessário informar um Email válido ou um Nome de Usuário.', 'error');
             return;
@@ -1306,10 +1300,8 @@ async function saveUser(e) {
     }
 
     const isEditing = !!id;
-    const usersFromDB = settings.users; // Referência local atual
+    const usersFromDB = settings.users; 
 
-    // 2. Checagem de duplicidade na lista local antes de ir pro servidor
-    // Verifica se o email ou o nome de usuário já existem em outro ID
     const isDuplicate = usersFromDB.some(u => 
         (u.username === finalEmail || (customUsername && u.customUsername === customUsername)) && 
         (!isEditing || u.id !== id)
@@ -1320,54 +1312,41 @@ async function saveUser(e) {
         return;
     }
 
-    // 3. CRIAÇÃO NO FIREBASE AUTH (O Passo Crucial)
-    // Se for um NOVO usuário, tentamos criar o login no Firebase antes de salvar no banco
     if (!isEditing) {
         if (password.length < 6) {
             showModal('Erro', 'A senha deve ter no mínimo 6 caracteres.', 'error');
             return;
         }
-
         try {
-            // Tenta criar o login oficial no Authentication
             await createUserWithEmailAndPassword(auth, finalEmail, password);
         } catch (e) {
             if (e.code === 'auth/email-already-in-use') {
-                // Se já existe, avisamos mas permitimos continuar (para sincronizar o banco)
                 showModal('Aviso', `O login ${finalEmail} já existe no Firebase Auth. O perfil local será apenas criado/sincronizado.`, 'warning');
             } else {
                 console.error(e);
-                // Se der outro erro (ex: erro de rede), paramos TUDO. Não salva no banco.
                 showModal('Erro de Auth', `Não foi possível criar o login: ${e.message}`, 'error');
                 return; 
             }
         }
     }
 
-    // 4. Preparação do Objeto para o Firestore
     let userToSave;
     
     if (isEditing) {
-        // Modo Edição
         userToSave = usersFromDB.find(u => u.id === id);
         if (!userToSave) {
             showModal('Erro', 'Usuário original não encontrado.', 'error');
             return;
         }
-        
-        // Atualiza dados
         userToSave.name = name;
         userToSave.username = finalEmail;
         userToSave.customUsername = customUsername;
         userToSave.role = role;
 
-        // Se estiver editando e digitou uma senha, atualizamos a "senha de referência" 
-        // (Apenas para usuários de login customizado, já que admin não muda senha Auth de outros sem saber a antiga)
         if (password.length >= 6 && customUsername) {
             userToSave.loginPassword = password; 
         }
     } else {
-        // Modo Criação (Novo)
         userToSave = { 
             id: crypto.randomUUID(), 
             name, 
@@ -1376,57 +1355,47 @@ async function saveUser(e) {
             role, 
             permissions: { dashboard: true, cadastro: true, pesquisa: true, settings: role === 'admin' }
         };
-
-        // Para usuários com nome customizado, salvamos a senha no banco para validação extra se necessário
         if (customUsername) {
             userToSave.loginPassword = password;
         }
-        // Adiciona na lista
-        usersFromDB.push(userToSave);
+        // Adiciona na lista local para refletir na UI imediatamente, mas o arrayUnion garante o banco
+        // (Se não for duplicado visualmente)
+        if (!usersFromDB.some(u => u.id === userToSave.id)) {
+             usersFromDB.push(userToSave);
+        }
     }
 
-    // 5. try {
+    // --- CORREÇÃO FEITA AQUI: Descomentei o try ---
+    try {
         const settingsDocRef = doc(db, "artifacts", appId, "public", "data", "settings", "config");
 
         if (isEditing) {
             // --- MODO EDIÇÃO ---
-            // Para não apagar outros, baixamos a lista atualizada do banco primeiro
             const snap = await getDoc(settingsDocRef);
             let currentUsers = snap.exists() ? snap.data().users || [] : [];
 
-            // Encontra e substitui o usuário na lista fresca do servidor
             const idx = currentUsers.findIndex(u => u.id === id);
             if (idx !== -1) {
                 currentUsers[idx] = userToSave;
             } else {
-                // Se não achou (caso raro), adiciona
                 currentUsers.push(userToSave);
             }
 
-            // Salva a lista atualizada e segura
             await setDoc(settingsDocRef, { users: currentUsers }, { merge: true });
-            
-            // Atualiza a memória local para refletir na tela
             settings.users = currentUsers;
 
         } else {
-            // --- MODO CRIAÇÃO (NOVO) ---
-            // Usamos arrayUnion: Isso adiciona APENAS o novo usuário, sem tocar nos antigos
-            // É a forma mais segura contra apagamentos acidentais.
+            // --- MODO CRIAÇÃO ---
             await setDoc(settingsDocRef, {
                 users: arrayUnion(userToSave)
             }, { merge: true });
-
-            // Atualiza a lista local manualmente para ver o novo usuário sem precisar recarregar
-            // (Verifica se já não foi adicionado antes para evitar duplicidade visual)
-            if (!settings.users.some(u => u.id === userToSave.id)) {
-                settings.users.push(userToSave);
-            }
+            
+            // Não precisamos dar push no settings.users aqui porque já fizemos lá em cima no objeto userToSave
         }
-        // Atualiza a tela e limpa o formulário
+
+        showModal('Sucesso', `Perfil de ${name} salvo com sucesso! Login ativo.`, 'success');
         renderApp();
         
-        // Timeout pequeno para garantir que o DOM atualizou antes de limpar
         setTimeout(() => {
             const currentForm = document.getElementById('form-user');
             if (currentForm) {
@@ -5424,5 +5393,3 @@ window.hideVincularModal = hideVincularModal;
 // 🛑 handleDesvincularBordoIndividual NÃO É MAIS NECESSÁRIO como função separada no HTML
 // --- Inicialização do Sistema ---
 window.onload = initApp;
-
-

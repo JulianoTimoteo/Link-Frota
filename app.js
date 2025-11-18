@@ -85,9 +85,9 @@ const TIPOS_BORDO = ['Tela', 'Mag', 'Chip'];
 const DEFAULT_LETTER_MAP = {
     Colheita: 'A',
     Transporte: 'B', 
-    Oficina: 'NUM',
+    Oficina: 'C',
     TPL: 'D',
-    Industria: 'C'
+    Industria: 'NUM'
 };
 const DEFAULT_NEXT_INDEX = { A: 1, B: 1, C: 1, D: 1, NUM: 1 };
 
@@ -5394,3 +5394,4 @@ window.hideVincularModal = hideVincularModal;
 // 🛑 handleDesvincularBordoIndividual NÃO É MAIS NECESSÁRIO como função separada no HTML
 // --- Inicialização do Sistema ---
 window.onload = initApp;
+

@@ -6,6 +6,7 @@
     <title>💻Link-Frota🚚📡</title>
 
     <link rel="icon" type="image/x-icon" href="https://usinapitangueiras.com.br/wp-content/uploads/2020/10/cropped-favicon-180x180.png">
+    <link rel="apple-touch-icon" href="https://usinapitangueiras.com.br/wp-content/uploads/2020/10/cropped-favicon-180x180.png">
 
     <script src="https://cdn.tailwindcss.com"></script>
 
@@ -66,7 +67,7 @@
                 <h3 class="text-2xl font-bold text-gray-800 dark:text-gray-100 flex items-center">
                     <i class="fas fa-user-circle mr-2 text-green-main"></i> Meu Perfil
                 </h3>
-                <button onclick="hideProfileModal()" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors">
+                <button type="button" onclick="hideProfileModal()" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors" aria-label="Fechar perfil" title="Fechar perfil">
                     <i class="fas fa-times fa-lg"></i>
                 </button>
             </div>
@@ -87,7 +88,7 @@
                 <h3 class="text-2xl font-bold text-red-600 flex items-center">
                     <i class="fas fa-heart-crack mr-2"></i> Integridade de Dados Crítica
                 </h3>
-                <button onclick="hideDuplicityModal()" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors">
+                <button type="button" onclick="hideDuplicityModal()" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors" title="Fechar aviso" aria-label="Fechar aviso">
                     <i class="fas fa-times fa-lg"></i>
                 </button>
             </div>

@@ -300,20 +300,27 @@ async function attachFirestoreListeners() {
     detachFirestoreListeners();	
     if (!db || !appId || !currentUser) return; // Só anexa se estiver autenticado
 
-    // 1. Sincronizar Coleções (Acesso: Autenticado - Regra 3)
+    // 1. Sincronizar Coleções
     const collectionsToSync = {
         'radios': (data) => dbRadios = data,
         'equipamentos': (data) => dbEquipamentos = data,
-        // 🌟 NOVO: Listener para Bordos
         'bordos': (data) => dbBordos = data, 
         'registros': (data) => dbRegistros = data,
+        // [NOVO] Agora sincroniza a tabela separada de usuários
+        'users': (data) => {
+             // Atualiza a lista global e ordena por nome
+             settings.users = data.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+             
+             // Atualiza a tela sempre que houver mudanças
+             checkDuplicities();
+             if(!isLoggingIn) renderApp();
+        }
     };
 
     Object.keys(collectionsToSync).forEach(colName => {
-        // Coleções públicas (Regra 3)
         const colPath = `artifacts/${appId}/public/data/${colName}`;
         const q = query(collection(db, colPath));
-         
+        
         const unsub = onSnapshot(q, (querySnapshot) => {
             const data = [];
             querySnapshot.forEach((doc) => {
@@ -322,23 +329,13 @@ async function attachFirestoreListeners() {
             
             collectionsToSync[colName](data);	
             
-            // 🌟 NOVO: Verificar duplicidades após cada atualização do banco
-            checkDuplicities();
-            
-            if(isAuthReady) {
-                // A renderização principal agora é gerenciada pelo splash screen
-                // Se não estiver logando, renderiza imediatamente
-                if(!isLoggingIn) renderApp();
-            }
-
         }, (error) => {
             console.error(`Erro no listener de ${colName}:`, error);
-            showModal('Erro de Sincronia', `Não foi possível carregar dados de ${colName}. Verifique suas permissões.`, 'error');
         });
         firestoreListeners.push(unsub);
     });
 
-    // 2. Listener para Solicitações Pendentes (Acesso: Apenas Admin - Regra 1)
+    // 2. Listener para Solicitações Pendentes (Acesso: Apenas Admin)
     if (currentUser.role === 'admin') {
         const pendingColPath = `artifacts/${appId}/public/data/pending_approvals`;
         const qPending = query(collection(db, pendingColPath));
@@ -349,19 +346,15 @@ async function attachFirestoreListeners() {
                 data.push({ id: doc.id, ...doc.data() });
             });
             pendingUsers = data;
-            if(isAuthReady) {
-                if(!isLoggingIn) renderApp();
-            }
+            if(!isLoggingIn) renderApp();
         }, (error) => {
             console.error(`Erro no listener de pending_approvals:`, error);
         });
         firestoreListeners.push(unsubPending);
     }
-
+}
     // 3. Força renderização
     handleHashChange();
-}
-
 async function saveSettings() {
     if (!db || !appId) return;
     // [CORREÇÃO] Usa appId hardcoded

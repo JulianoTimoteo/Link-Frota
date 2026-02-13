@@ -1249,6 +1249,8 @@ function // --- Funções de CRUD de Usuário (CORRIGIDAS COM TRAVA DE SEGURANÇ
 
 function // --- Funções de CRUD de Usuário (CORRIGIDAS COM TRAVA DE SEGURANÇA E SINTAXE) ---
 
+// --- Funções de CRUD de Usuário (CORRIGIDAS E COM TRAVA DE SEGURANÇA) ---
+
 function loadUserForEdit(id) {
     const user = settings.users.find(u => u.id === id);
     if (user) {
@@ -1323,8 +1325,7 @@ async function saveUser(e) {
     try {
         const settingsDocRef = doc(db, "artifacts", appId, "public", "data", "settings", "config");
 
-        // --- TRAVA DE SEGURANÇA CONTRA APAGAMENTO ---
-        // Forçamos a leitura do banco para garantir que não salvaremos uma lista vazia
+        // --- TRAVA DE SEGURANÇA DEFINITIVA ---
         const snap = await getDoc(settingsDocRef);
         if (!snap.exists()) {
             showModal('Erro', 'Documento de configuração não encontrado no Firestore.', 'error');
@@ -1336,7 +1337,7 @@ async function saveUser(e) {
         let userToSave;
 
         if (isEditing) {
-            // MODO EDIÇÃO: Atualiza apenas o índice correto no array
+            // MODO EDIÇÃO: Atualiza apenas o objeto correto
             const idx = currentUsers.findIndex(u => u.id === id);
             if (idx !== -1) {
                 userToSave = { ...currentUsers[idx] };
@@ -1351,7 +1352,7 @@ async function saveUser(e) {
                 settings.users = currentUsers;
             }
         } else {
-            // MODO CRIAÇÃO: Adição atômica via arrayUnion (Segurança Máxima)
+            // MODO CRIAÇÃO: Adição ATÔMICA (Não apaga ninguém)
             userToSave = { 
                 id: crypto.randomUUID(), 
                 name, 
@@ -1392,7 +1393,6 @@ async function deleteUser(id) {
     }
     
     try {
-        // Remoção atômica via arrayRemove
         await updateDoc(settingsDocRef, {
             users: arrayRemove(userToDelete)
         });
@@ -1402,7 +1402,7 @@ async function deleteUser(id) {
         renderApp(); 
     } catch (e) {
         console.error("Erro ao excluir:", e);
-        showModal('Erro', 'Não foi possível excluir o perfil no banco de dados.', 'error');
+        showModal('Erro', 'Não foi possível excluir o perfil.', 'error');
     }
 }
 
@@ -5258,4 +5258,5 @@ window.hideVincularModal = hideVincularModal;
 // 🛑 handleDesvincularBordoIndividual NÃO É MAIS NECESSÁRIO como função separada no HTML
 // --- Inicialização do Sistema ---
 window.onload = initApp;
+
 

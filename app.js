@@ -1242,7 +1242,7 @@ async function deleteDuplicity(collectionName, id) {
     }
 }
 
-// --- BLOCO DEFINITIVO: GESTÃO DE USUÁRIOS ---
+// --- INÍCIO DO BLOCO DE GESTÃO DE USUÁRIOS (LIMPO E CORRIGIDO) ---
 
 function loadUserForEdit(id) {
     const user = settings.users.find(u => u.id === id);
@@ -1281,9 +1281,6 @@ async function saveUser(e) {
     let finalEmail = email;
     if (customUsername && !finalEmail) {
         finalEmail = createGenericEmail(customUsername, appId);
-    } else if (!finalEmail || !isEmail(finalEmail)) {
-        showModal('Erro', 'É necessário informar um Email válido ou um Nome de Usuário.', 'error');
-        return;
     }
 
     const isEditing = !!id;
@@ -1317,10 +1314,10 @@ async function saveUser(e) {
     try {
         const settingsDocRef = doc(db, "artifacts", appId, "public", "data", "settings", "config");
 
-        // TRAVA DE SEGURANÇA: Lê o banco para garantir que não vamos sobrescrever com lista vazia
+        // TRAVA DE SEGURANÇA: Lê o banco para garantir que os dados existem antes de salvar
         const snap = await getDoc(settingsDocRef);
         if (!snap.exists()) {
-            showModal('Erro', 'Configurações não encontradas no banco.', 'error');
+            showModal('Erro', 'Documento de configuração não encontrado no Firestore.', 'error');
             return;
         }
         
@@ -1348,13 +1345,13 @@ async function saveUser(e) {
             };
             if (customUsername) userToSave.loginPassword = password;
 
-            // arrayUnion garante que o item seja ADICIONADO sem mexer no que já existe
+            // arrayUnion: Adiciona sem apagar ninguém
             await updateDoc(settingsDocRef, {
                 users: arrayUnion(userToSave)
             });
         }
 
-        showModal('Sucesso', `Perfil salvo com sucesso!`, 'success');
+        showModal('Sucesso', `Perfil de ${name} salvo com sucesso!`, 'success');
         renderApp();
         resetUserForm();
 
@@ -1395,11 +1392,14 @@ function resetUserForm() {
     if (currentForm) {
         currentForm.reset();
         document.getElementById('user-id').value = '';
-        document.getElementById('user-form-title').textContent = 'Novo Perfil de Usuário';
-        document.getElementById('user-password-field').classList.remove('hidden');
+        const titleEl = document.getElementById('user-form-title');
+        if(titleEl) titleEl.textContent = 'Novo Perfil de Usuário';
+        const passField = document.getElementById('user-password-field');
+        if(passField) passField.classList.remove('hidden');
     }
 }
-// --- FIM DO BLOCO DE USUÁRIOS ---
+
+// --- FIM DO BLOCO DE GESTÃO DE USUÁRIOS ---
     // 2. Verificar se já existe uma solicitação pendente com este email
     // [CORREÇÃO] Usa appId hardcoded
     const pendingColRef = collection(db, `artifacts/${appId}/public/data/pending_approvals`);
@@ -5241,6 +5241,7 @@ window.hideVincularModal = hideVincularModal;
 // 🛑 handleDesvincularBordoIndividual NÃO É MAIS NECESSÁRIO como função separada no HTML
 // --- Inicialização do Sistema ---
 window.onload = initApp;
+
 
 
 

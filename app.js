@@ -239,6 +239,63 @@ function checkDuplicities() {
     ).sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt)); 
 }
 
+
+// --- Funções de Utilitário e Estado ---
+function detachFirestoreListeners() {
+    firestoreListeners.forEach(unsub => unsub());
+    firestoreListeners = [];
+}
+
+/**
+ * NOVO: Verifica se o valor é um email ou um nome de usuário.
+ */
+function isEmail(value) {
+    return value.includes('@') && value.includes('.');
+}
+
+/**
+ * NOVO: Cria um email genérico para uso no Firebase Auth
+ */
+function createGenericEmail(customUsername, appId) {
+    // Garante que o username é seguro para ser a parte local do email
+    const safeUsername = customUsername.toLowerCase().replace(/[^a-z0-9]/g, '');
+    return `${safeUsername}@${appId}.fake`;
+}
+
+async function loadInitialSettings() {
+    if (!db || !appId) return;
+
+    const settingsDocRef = doc(db, "artifacts", appId, "public", "data", "settings", "config");
+    try {
+        // Tenta ler as configurações. A regra de segurança deve permitir a leitura para corrigir o erro inicial.
+        const settingsSnap = await getDoc(settingsDocRef);
+        if (settingsSnap.exists()) {
+            const data = settingsSnap.data();
+            settings.letterMap = data.letterMap || DEFAULT_LETTER_MAP;
+            settings.nextIndex = data.nextIndex || DEFAULT_NEXT_INDEX;
+            settings.users = data.users || []; 
+        } else {
+            console.warn("Documento de 'settings/config' não encontrado. Usando padrões locais.");
+            // Define um usuário admin padrão se não houver configurações
+            if (settings.users.length === 0) {
+                settings.users = [{ 
+                    id: crypto.randomUUID(), 
+                    name: "Juliano Timoteo (Admin Padrão)", 
+                    username: ADMIN_PRINCIPAL_EMAIL, 
+                    role: "admin",
+                    permissions: { dashboard: true, cadastro: true, pesquisa: true, settings: true }
+                }];
+            }
+            // Tenta salvar, permitindo que a aplicação se configure se as regras permitirem.
+            saveSettings();	
+        }
+    } catch (e) {
+        // Loga o erro, mas a aplicação continua com os valores padrão de settings.users (a contingência no auth listener será usada).
+        console.error("Erro ao carregar 'settings/config' na inicialização:", e);
+    }
+}
+
+
 async function attachFirestoreListeners() {
     detachFirestoreListeners();	
     if (!db || !appId || !currentUser) return; // Só anexa se estiver autenticado
@@ -295,11 +352,9 @@ async function attachFirestoreListeners() {
         });
         firestoreListeners.push(unsubPending);
     }
-    
+}
     // 3. Força renderização
     handleHashChange();
-}
-
 async function saveSettings() {
     if (!db || !appId) return;
     // [CORREÇÃO] Usa appId hardcoded
@@ -1187,27 +1242,27 @@ async function deleteDuplicity(collectionName, id) {
     }
 }
 
-// =============================================================================
-// --- BLOCO INTEGRADO E FINAL: GESTÃO DE USUÁRIOS E SOLICITAÇÕES ---
-// =============================================================================
 
-// =============================================================================
-// --- BLOCO INTEGRADO: USUÁRIOS, SOLICITAÇÕES E APROVAÇÕES (RESTAURADO) ---
-// =============================================================================
+// --- Funções de CRUD de Usuário (ATUALIZADO PARA CUSTOM LOGIN) ---
 
 function loadUserForEdit(id) {
     const user = settings.users.find(u => u.id === id);
     if (user) {
         document.getElementById('user-id').value = user.id;
         document.getElementById('user-name').value = user.name;
-        document.getElementById('user-username').value = user.username; 
-        document.getElementById('user-custom-username').value = user.customUsername || '';
+        document.getElementById('user-username').value = user.username; // Email
+        document.getElementById('user-custom-username').value = user.customUsername || ''; // NOVO: Nome de usuário
         document.getElementById('user-role').value = user.role;
+        
+        // Oculta o campo de senha para edição, a menos que o admin queira alterá-la.
         document.getElementById('user-password-field').classList.add('hidden');
-        document.getElementById('user-password').value = ''; 
+        document.getElementById('user-password').value = ''; 
+
         document.getElementById('user-form-title').textContent = 'Editar Perfil de Usuário';
         showModal('Edição', `Carregando perfil de ${user.name} para edição.`, 'info');
         window.scrollTo(0, 0);
+    } else {
+        showModal('Erro', 'Usuário não encontrado.', 'error');
     }
 }
 
@@ -1215,142 +1270,371 @@ async function saveUser(e) {
     e.preventDefault();
     const id = document.getElementById('user-id').value;
     const name = document.getElementById('user-name').value.trim();
-    const email = document.getElementById('user-username').value.trim();
+    let email = document.getElementById('user-username').value.trim();
     const customUsername = document.getElementById('user-custom-username').value.trim();
     const password = document.getElementById('user-password').value;
     const role = document.getElementById('user-role').value;
     
     if (!name || !role) {
         showModal('Erro', 'Nome Completo e Perfil são obrigatórios.', 'error');
-        return; 
+        return;
     }
 
-    let finalEmail = email || (customUsername ? createGenericEmail(customUsername, appId) : '');
-    const isEditing = !!id;
-
-    try {
-        const settingsDocRef = doc(db, "artifacts", appId, "public", "data", "settings", "config");
-        const snap = await getDoc(settingsDocRef);
-        
-        if (!snap.exists()) {
-            showModal('Erro Crítico', 'Falha ao ler banco. Operação cancelada.', 'error');
+    let finalEmail = email;
+    if (customUsername) {
+        if (!finalEmail) {
+            finalEmail = createGenericEmail(customUsername, appId);
+        }
+    } else {
+        if (!finalEmail || !isEmail(finalEmail)) {
+            showModal('Erro', 'É necessário informar um Email válido ou um Nome de Usuário.', 'error');
             return;
         }
+    }
 
-        if (!isEditing) {
-            await createUserWithEmailAndPassword(auth, finalEmail, password || '123456');
-            const newUser = { 
-                id: crypto.randomUUID(), name, username: finalEmail, customUsername, role, 
-                permissions: { dashboard: true, cadastro: true, pesquisa: true, settings: role === 'admin' }
-            };
-            await updateDoc(settingsDocRef, { users: arrayUnion(newUser) });
-        } else {
-            const currentUsers = snap.data().users || [];
-            const idx = currentUsers.findIndex(u => u.id === id);
-            if (idx !== -1) {
-                currentUsers[idx] = { ...currentUsers[idx], name, username: finalEmail, customUsername, role };
-                await updateDoc(settingsDocRef, { users: currentUsers });
+    const isEditing = !!id;
+    const usersFromDB = settings.users; 
+
+    const isDuplicate = usersFromDB.some(u => 
+        (u.username === finalEmail || (customUsername && u.customUsername === customUsername)) && 
+        (!isEditing || u.id !== id)
+    );
+
+    if (isDuplicate) {
+        showModal('Erro', `Este usuário ou email (${finalEmail}) já está cadastrado no sistema.`, 'error');
+        return;
+    }
+
+    if (!isEditing) {
+        if (password.length < 6) {
+            showModal('Erro', 'A senha deve ter no mínimo 6 caracteres.', 'error');
+            return;
+        }
+        try {
+            await createUserWithEmailAndPassword(auth, finalEmail, password);
+        } catch (e) {
+            if (e.code === 'auth/email-already-in-use') {
+                showModal('Aviso', `O login ${finalEmail} já existe no Firebase Auth. O perfil local será apenas criado/sincronizado.`, 'warning');
+            } else {
+                console.error(e);
+                showModal('Erro de Auth', `Não foi possível criar o login: ${e.message}`, 'error');
+                return; 
             }
         }
-        showModal('Sucesso', 'Perfil salvo com sucesso!', 'success');
+    }
+
+    let userToSave;
+    
+    if (isEditing) {
+        userToSave = usersFromDB.find(u => u.id === id);
+        if (!userToSave) {
+            showModal('Erro', 'Usuário original não encontrado.', 'error');
+            return;
+        }
+        userToSave.name = name;
+        userToSave.username = finalEmail;
+        userToSave.customUsername = customUsername;
+        userToSave.role = role;
+
+        if (password.length >= 6 && customUsername) {
+            userToSave.loginPassword = password; 
+        }
+    } else {
+        userToSave = { 
+            id: crypto.randomUUID(), 
+            name, 
+            username: finalEmail, 
+            customUsername, 
+            role, 
+            permissions: { dashboard: true, cadastro: true, pesquisa: true, settings: role === 'admin' }
+        };
+        if (customUsername) {
+            userToSave.loginPassword = password;
+        }
+        // Adiciona na lista local para refletir na UI imediatamente, mas o arrayUnion garante o banco
+        // (Se não for duplicado visualmente)
+        if (!usersFromDB.some(u => u.id === userToSave.id)) {
+             usersFromDB.push(userToSave);
+        }
+    }
+
+    // --- CORREÇÃO FEITA AQUI: Descomentei o try ---
+    try {
+        const settingsDocRef = doc(db, "artifacts", appId, "public", "data", "settings", "config");
+
+        if (isEditing) {
+            // --- MODO EDIÇÃO ---
+            const snap = await getDoc(settingsDocRef);
+            let currentUsers = snap.exists() ? snap.data().users || [] : [];
+
+            const idx = currentUsers.findIndex(u => u.id === id);
+            if (idx !== -1) {
+                currentUsers[idx] = userToSave;
+            } else {
+                currentUsers.push(userToSave);
+            }
+
+            await setDoc(settingsDocRef, { users: currentUsers }, { merge: true });
+            settings.users = currentUsers;
+
+        } else {
+            // --- MODO CRIAÇÃO ---
+            await setDoc(settingsDocRef, {
+                users: arrayUnion(userToSave)
+            }, { merge: true });
+            
+            // Não precisamos dar push no settings.users aqui porque já fizemos lá em cima no objeto userToSave
+        }
+
+        showModal('Sucesso', `Perfil de ${name} salvo com sucesso! Login ativo.`, 'success');
         renderApp();
-        resetUserForm();
-    } catch (err) {
-        showModal('Erro', 'Erro ao salvar: ' + err.message, 'error');
+        
+        setTimeout(() => {
+            const currentForm = document.getElementById('form-user');
+            if (currentForm) {
+                currentForm.reset();
+                document.getElementById('user-id').value = '';
+                const titleEl = document.getElementById('user-form-title');
+                if(titleEl) titleEl.textContent = 'Novo Perfil de Usuário';
+                const passField = document.getElementById('user-password-field');
+                if(passField) passField.classList.remove('hidden');
+            }
+        }, 100);
+
+    } catch (e) {
+        console.error("Erro ao salvar no Firestore:", e);
+        showModal('Erro', 'O login foi criado no Auth, mas houve falha ao salvar os dados no banco de dados.', 'error');
     }
 }
 
+// app.js (Substituir a partir da linha 1386)
 async function deleteUser(id) {
+    const settingsDocRef = doc(db, "artifacts", appId, "public", "data", "settings", "config");
+    
+    // 1. Precisamos encontrar o objeto EXATO do usuário para o arrayRemove
+    // (Usamos a lista local 'settings.users' que está em memória para isso)
     const userToDelete = settings.users.find(u => u.id === id);
-    if (!userToDelete || userToDelete.username === ADMIN_PRINCIPAL_EMAIL) return;
+    
+    if (!userToDelete) {
+        showModal('Erro', 'Usuário não encontrado para exclusão.', 'error');
+        return;
+    }
+
+    const userName = userToDelete.name;
+    const userUsername = userToDelete.username;
+
+    // Bloqueia exclusão do admin principal
+    if (userUsername === ADMIN_PRINCIPAL_EMAIL) {
+        showModal('Bloqueado', 'O usuário principal (Admin) não pode ser excluído.', 'warning');
+        return;
+    }
+    
+    try {
+        // --- AQUI ESTÁ A CORREÇÃO DEFINITIVA ---
+        // Em vez de 'setDoc' com a lista modificada...
+        // ...usamos 'updateDoc' com 'arrayRemove'.
+        await updateDoc(settingsDocRef, {
+            users: arrayRemove(userToDelete)
+        });
+
+        // Atualiza a memória local (só depois que o banco confirmou)
+        settings.users = settings.users.filter(u => u.id !== id);
+
+        showModal('Sucesso', `Perfil de ${userName} excluído com sucesso!`, 'success');
+        renderApp(); 
+    } catch (e) {
+        showModal('Erro', 'Não foi possível excluir o perfil no banco de dados.', 'error');
+    }
+}
+
+// --- Funções de Gerenciamento de Pendências (Novo) ---
+
+async function approveUser(pendingId, name, email, tempPassword) {
+    if (!db || !appId || !currentUser || currentUser.role !== 'admin') {
+        showModal('Acesso Negado', 'Você não tem permissão ou conexão para realizar esta ação.', 'error');
+        return;
+    }
+
+    // 1. Tenta criar o Usuário no Firebase Authentication (Login real)
+    try {
+        await createUserWithEmailAndPassword(auth, email, tempPassword);
+    } catch (e) {
+        if (e.code === 'auth/email-already-in-use') {
+            console.warn(`O email ${email} já existia no Auth. Prosseguindo para criar no Banco de Dados.`);
+        } else {
+            console.error("Erro ao criar no Auth:", e);
+            showModal('Erro Crítico', `O Firebase recusou a criação da senha: ${e.message}`, 'error');
+            return; // Aborta tudo se não conseguir criar o login
+        }
+    }
+
+    // 2. Se o login foi criado (ou já existia), agora salvamos os DADOS no Firestore
     try {
         const settingsDocRef = doc(db, "artifacts", appId, "public", "data", "settings", "config");
-        await updateDoc(settingsDocRef, { users: arrayRemove(userToDelete) });
-        showModal('Sucesso', 'Usuário removido.', 'success');
+
+        // Define o novo usuário que queremos ADICIONAR
+        const newUser = { 
+            id: crypto.randomUUID(), 
+            name: name, 
+            username: email, // Este email deve bater com o Authentication
+            role: 'user', // Padrão: usuário comum
+            permissions: { dashboard: true, cadastro: true, pesquisa: true, settings: false }
+        };
+
+        // 3. Executa a gravação no banco e remove a pendência (Batch = Atômico)
+        const batch = writeBatch(db);
+        
+        // --- AQUI ESTÁ A CORREÇÃO DEFINITIVA ---
+        // Em vez de 'update' com a lista lida (arriscada), usamos 'arrayUnion'.
+        // Isso adiciona atomicamente o 'newUser' ao array 'users' no banco.
+        // Usamos set com merge:true para criar o doc 'settings' se ele não existir.
+        batch.set(settingsDocRef, { 
+            users: arrayUnion(newUser) 
+        }, { merge: true });
+        
+        // Remove da lista de pendências
+        const pendingDocRef = doc(db, `artifacts/${appId}/public/data/pending_approvals`, pendingId);
+        batch.delete(pendingDocRef);
+
+        await batch.commit();
+        
+        // Atualiza a memória local (agora precisamos recarregar as settings)
+        // A forma mais segura é forçar um reload das settings locais:
+        await loadInitialSettings(); 
+        
+        hideModal();
+        showModal('Sucesso', `Usuário <b>${name}</b> aprovado!<br>Login: ${email}<br>Senha: ${tempPassword}<br><br>Ele já pode logar.`, 'success');
+        
+        // Atualiza a tela
         renderApp();
+
     } catch (e) {
-        showModal('Erro', 'Falha ao excluir.', 'error');
+        // ... (O restante do seu catch de erro)
+        console.error("Erro ao salvar dados no Firestore:", e);
+        showModal('Erro de Dados', 'O login foi criado, mas houve erro ao salvar os dados no sistema. Tente atualizar a página.', 'error');
+    }
+}
+
+// NOVO: Função para solicitar acesso
+async function handleSolicitarAcesso(e) {
+    e.preventDefault();
+    
+    const form = e.target;
+    const nome = form['solicitar-name'].value.trim();
+    const email = form['solicitar-email'].value.trim();
+    const telefone = form['solicitar-phone'].value.trim();
+    const senhaProvisoria = form['solicitar-temp-password'].value.trim();
+
+    if (!nome || !email || !telefone || !senhaProvisoria) {
+        showModal('Erro', 'Todos os campos são obrigatórios.', 'error');
+        return;
+    }
+    if (!isEmail(email)) {
+        showModal('Erro', 'Email inválido.', 'error');
+        return;
+    }
+    if (senhaProvisoria.length < 6) {
+        showModal('Erro', 'A Senha Provisória deve ter no mínimo 6 caracteres.', 'error');
+        return;
+    }
+
+    // 1. Verificar se o email já está aprovado
+    const appUser = settings.users.find(u => u.username === email);
+    if (appUser) {
+        showModal('Acesso Já Aprovado', 'Este email já possui um perfil aprovado. Tente o login.', 'info');
+        return;
+    }
+
+    // 2. Verificar se já existe uma solicitação pendente com este email
+    // [CORREÇÃO] Usa appId hardcoded
+    const pendingColRef = collection(db, `artifacts/${appId}/public/data/pending_approvals`);
+    const q = query(pendingColRef, where("email", "==", email));
+    const pendingSnap = await getDocs(q);
+    
+    if (!pendingSnap.empty) {
+        showModal('Solicitação Pendente', 'Este email já possui uma solicitação de acesso pendente. Aguarde a aprovação do administrador.', 'warning');
+        return;
+    }
+
+    try {
+        // 3. Envia a nova solicitação para o Firestore (Permissão permitida para qualquer usuário - Regra 1)
+        await addDoc(pendingColRef, {
+            name: nome,
+            email: email,
+            phone: telefone,
+            tempPassword: senhaProvisoria, // A senha provisória é apenas para referência do Admin
+            createdAt: new Date().toISOString()
+        });
+
+        showModal('Solicitação Enviada', 
+            `Sua solicitação de acesso foi enviada com sucesso para aprovação. Você será notificado após a análise.`, 
+            'success');
+        
+        // Volta para a tela de login principal
+        form.reset();
+        updateState('loginView', 'login');
+    
+    } catch (error) {
+        showModal('Erro', 'Ocorreu um erro ao enviar sua solicitação.', 'error');
     }
 }
 
 function renderPendingApprovalsModal() {
-    if (!currentUser || currentUser.role !== 'admin') return;
-    
-    const pendingListHTML = pendingUsers.length > 0 ? 
+    // Regra 1 permite apenas Admin Principal ler a coleção, mas vamos checar a role localmente
+    if (currentUser.role !== 'admin') {
+        showModal('Acesso Negado', 'Apenas administradores podem visualizar as solicitações de acesso.', 'error');
+        return;
+    }
+
+    const pendingListHTML = pendingUsers.length > 0 ? 
         pendingUsers.map(u => `
-            <div class="flex items-center justify-between p-3 border-b dark:border-gray-700 bg-white dark:bg-gray-700 rounded-lg mb-2 shadow-sm">
+            <div class="flex items-center justify-between p-3 border-b border-gray-100 last:border-b-0 bg-white dark:bg-gray-700 rounded-lg shadow-sm">
                 <div>
-                    <p class="font-semibold dark:text-white">${u.name}</p>
-                    <p class="text-xs text-gray-500">${u.email}</p>
+                    <p class="font-semibold text-gray-800 dark:text-gray-100">${u.name}</p>
+                    <p class="text-xs text-gray-500 dark:text-gray-300">${u.email}</p>
+                    <p class="text-xs text-gray-500 dark:text-gray-300">Telefone: ${u.phone || 'N/A'}</p>
+                    <p class="text-xs text-gray-500 dark:text-gray-300">Senha Provisória: ${u.tempPassword || 'N/A'}</p>
+                    <p class="text-xs text-gray-500 dark:text-gray-300">Solicitado em: ${new Date(u.createdAt).toLocaleDateString()} ${new Date(u.createdAt).toLocaleTimeString()}</p>
                 </div>
                 <div class="flex space-x-2">
-                    <button onclick="approveUserWrapper('${u.id}', '${u.name}', '${u.email}', '${u.tempPassword}')" class="px-3 py-1 text-xs bg-green-main text-white rounded-lg">Aprovar</button>
-                    <button onclick="rejectUserWrapper('${u.id}', '${u.name}')" class="px-3 py-1 text-xs bg-red-50 text-white rounded-lg">Negar</button>
+                    <button onclick="approveUserWrapper('${u.id}', '${u.name}', '${u.email}', '${u.tempPassword}')" class="px-3 py-1 text-xs bg-green-main text-white rounded-lg hover:bg-green-700 shadow-md transition-colors">
+                        Aprovar
+                    </button>
+                    <button onclick="rejectUserWrapper('${u.id}', '${u.name}')" class="px-3 py-1 text-xs bg-red-500 text-white rounded-lg hover:bg-red-600 shadow-md transition-colors">
+                        Negar
+                    </button>
                 </div>
             </div>
-        `).join('') : '<p class="text-center py-4 text-gray-500">Nenhuma solicitação pendente.</p>';
+        `).join('')
+        : '<p class="text-gray-500 dark:text-gray-400 text-center py-4">Nenhuma solicitação de acesso pendente.</p>';
 
     const modal = document.getElementById('global-modal');
-    document.getElementById('modal-title').textContent = `Aprovações Pendentes (${pendingUsers.length})`;
-    document.getElementById('modal-message').innerHTML = `<div class="max-h-80 overflow-y-auto">${pendingListHTML}</div>`;
-    document.getElementById('modal-actions').innerHTML = `<button onclick="hideModal()" class="px-4 py-2 bg-gray-200 dark:bg-gray-700 rounded-lg">Fechar</button>`;
+    const titleEl = document.getElementById('modal-title');
+    const messageEl = document.getElementById('modal-message');
+    const actionsEl = document.getElementById('modal-actions');
+
+    titleEl.textContent = `Aprovações Pendentes (${pendingUsers.length})`;
+    // Remove a classe 'max-w-sm' do modal principal para permitir mais espaço
+    modal.querySelector('div').classList.remove('max-w-sm');
+    modal.querySelector('div').classList.add('max-w-lg'); 
+    
+    messageEl.innerHTML = `
+        <p class="text-sm text-gray-600 dark:text-gray-300 mb-4">Novos usuários aguardam sua aprovação.</p>
+        <div class="max-h-80 overflow-y-auto space-y-3 p-2 bg-gray-50 dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700">
+            ${pendingListHTML}
+        </div>
+    `;
+    titleEl.className = `text-xl font-bold mb-3 ${pendingUsers.length > 0 ? 'text-yellow-600' : 'text-gray-800 dark:text-gray-100'}`;
+
+    actionsEl.innerHTML = `
+        <button onclick="hideModal(); document.getElementById('global-modal').querySelector('div').classList.remove('max-w-lg'); document.getElementById('global-modal').querySelector('div').classList.add('max-w-sm');" 
+                class="px-3 py-1.5 text-sm bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 font-semibold rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors shadow-md">
+            Fechar
+        </button>
+    `;
     modal.classList.remove('hidden');
     modal.classList.add('flex');
 }
-
-async function approveUser(pendingId, name, email, tempPassword) {
-    try {
-        await createUserWithEmailAndPassword(auth, email, tempPassword);
-        const settingsDocRef = doc(db, "artifacts", appId, "public", "data", "settings", "config");
-        const newUser = { 
-            id: crypto.randomUUID(), name, username: email, role: 'user', 
-            permissions: { dashboard: true, cadastro: true, pesquisa: true, settings: false } 
-        };
-        const batch = writeBatch(db);
-        batch.update(settingsDocRef, { users: arrayUnion(newUser) });
-        batch.delete(doc(db, `artifacts/${appId}/public/data/pending_approvals`, pendingId));
-        await batch.commit();
-        showModal('Sucesso', 'Usuário aprovado!', 'success');
-        renderApp();
-    } catch (e) {
-        showModal('Erro', 'Falha na aprovação: ' + e.message, 'error');
-    }
-}
-
-async function rejectUser(id, name) {
-    try {
-        await deleteDoc(doc(db, `artifacts/${appId}/public/data/pending_approvals`, id));
-        renderApp();
-    } catch (e) { console.error(e); }
-}
-
-async function handleSolicitarAcesso(e) {
-    e.preventDefault();
-    const form = e.target;
-    const nome = form['solicitar-name'].value.trim();
-    const email = form['solicitar-email'].value.trim();
-    const phone = form['solicitar-phone'].value.trim();
-    const pass = form['solicitar-temp-password'].value.trim();
-
-    try {
-        const pendingColRef = collection(db, `artifacts/${appId}/public/data/pending_approvals`);
-        await addDoc(pendingColRef, { 
-            name: nome, email, phone, tempPassword: pass, createdAt: new Date().toISOString() 
-        });
-        showModal('Solicitação Enviada', 'Sua solicitação foi enviada com sucesso!', 'success');
-        form.reset();
-        updateState('loginView', 'login');
-    } catch (error) {
-        showModal('Erro', 'Falha ao enviar solicitação.', 'error');
-    }
-}
-
-function resetUserForm() {
-    const f = document.getElementById('form-user');
-    if (f) { f.reset(); document.getElementById('user-id').value = ''; }
-}
-
-// =============================================================================
 
 // Wrappers para lidar com aspas em strings
 window.approveUserWrapper = (id, name, email, tempPassword) => {
@@ -5036,86 +5320,6 @@ async function processImportedData(collectionName, data) {
     }
 }
 
-// =============================================================================
-// --- FUNÇÕES DE INICIALIZAÇÃO E SUPORTE (RESTAURADAS) ---
-// =============================================================================
-
-async function loadInitialSettings() {
-    if (!db || !appId) return;
-    const settingsDocRef = doc(db, "artifacts", appId, "public", "data", "settings", "config");
-    try {
-        const settingsSnap = await getDoc(settingsDocRef);
-        if (settingsSnap.exists()) {
-            const data = settingsSnap.data();
-            settings.letterMap = data.letterMap || DEFAULT_LETTER_MAP;
-            settings.nextIndex = data.nextIndex || DEFAULT_NEXT_INDEX;
-            settings.users = data.users || []; 
-        } else {
-            console.warn("Documento de config não encontrado. Usando padrões locais.");
-            if (settings.users.length === 0) {
-                settings.users = [{ 
-                    id: crypto.randomUUID(), 
-                    name: "Admin Principal", 
-                    username: ADMIN_PRINCIPAL_EMAIL, 
-                    role: "admin",
-                    permissions: { dashboard: true, cadastro: true, pesquisa: true, settings: true }
-                }];
-            }
-            saveSettings(); 
-        }
-    } catch (e) {
-        console.error("Erro ao carregar configurações:", e);
-    }
-}
-
-async function handleSolicitarAcesso(e) {
-    e.preventDefault();
-    const form = e.target;
-    const nome = form['solicitar-name'].value.trim();
-    const email = form['solicitar-email'].value.trim();
-    const phone = form['solicitar-phone'].value.trim();
-    const pass = form['solicitar-temp-password'].value.trim();
-
-    try {
-        const pendingColRef = collection(db, `artifacts/${appId}/public/data/pending_approvals`);
-        await addDoc(pendingColRef, { 
-            name: nome, email, phone, tempPassword: pass, createdAt: new Date().toISOString() 
-        });
-        showModal('Solicitação Enviada', 'Aguarde a aprovação do administrador.', 'success');
-        form.reset();
-        updateState('loginView', 'login');
-    } catch (error) {
-        showModal('Erro', 'Falha ao enviar solicitação.', 'error');
-    }
-}
-
-async function approveUser(pendingId, name, email, tempPassword) {
-    try {
-        await createUserWithEmailAndPassword(auth, email, tempPassword);
-        const settingsDocRef = doc(db, "artifacts", appId, "public", "data", "settings", "config");
-        const newUser = { 
-            id: crypto.randomUUID(), name, username: email, role: 'user', 
-            permissions: { dashboard: true, cadastro: true, pesquisa: true, settings: false } 
-        };
-        await updateDoc(settingsDocRef, { users: arrayUnion(newUser) });
-        await deleteDoc(doc(db, `artifacts/${appId}/public/data/pending_approvals`, pendingId));
-        showModal('Sucesso', 'Usuário aprovado!', 'success');
-        renderApp();
-    } catch (e) {
-        showModal('Erro', 'Falha na aprovação: ' + e.message, 'error');
-    }
-}
-
-async function rejectUser(id, name) {
-    try {
-        await deleteDoc(doc(db, `artifacts/${appId}/public/data/pending_approvals`, id));
-        showModal('Removido', 'Solicitação descartada.', 'info');
-        renderApp();
-    } catch (e) { console.error(e); }
-}
-
-// =============================================================================
-
 // -------------------------------------------------------------------------------------
 
 // --- Inicialização ---
@@ -5169,6 +5373,8 @@ window.RADIO_IMPORT_INFO = RADIO_IMPORT_INFO;
 window.EQUIPAMENTO_IMPORT_INFO = EQUIPAMENTO_IMPORT_INFO;
 window.BORDO_IMPORT_INFO = BORDO_IMPORT_INFO; // 🌟 NOVO: Expondo constante de Bordo
 window.toggleTheme = toggleTheme;
+
+
 window.deleteLink = deleteLink;
 window.deleteDuplicity = deleteDuplicity;
 window.deleteDuplicityWrapper = (collectionName, id, value) => {
@@ -5180,19 +5386,3 @@ window.hideVincularModal = hideVincularModal;
 // 🛑 handleDesvincularBordoIndividual NÃO É MAIS NECESSÁRIO como função separada no HTML
 // --- Inicialização do Sistema ---
 window.onload = initApp;
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

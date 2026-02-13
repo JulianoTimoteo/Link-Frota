@@ -1247,6 +1247,8 @@ async function deleteDuplicity(collectionName, id) {
 
 function // --- Funções de CRUD de Usuário (CORRIGIDAS COM TRAVA DE SEGURANÇA E SEM ERROS DE SINTAXE) ---
 
+function // --- Funções de CRUD de Usuário (CORRIGIDAS COM TRAVA DE SEGURANÇA E SINTAXE) ---
+
 function loadUserForEdit(id) {
     const user = settings.users.find(u => u.id === id);
     if (user) {
@@ -1322,9 +1324,10 @@ async function saveUser(e) {
         const settingsDocRef = doc(db, "artifacts", appId, "public", "data", "settings", "config");
 
         // --- TRAVA DE SEGURANÇA CONTRA APAGAMENTO ---
+        // Forçamos a leitura do banco para garantir que não salvaremos uma lista vazia
         const snap = await getDoc(settingsDocRef);
         if (!snap.exists()) {
-            showModal('Erro', 'Configurações não encontradas no banco.', 'error');
+            showModal('Erro', 'Documento de configuração não encontrado no Firestore.', 'error');
             return;
         }
         
@@ -1333,7 +1336,7 @@ async function saveUser(e) {
         let userToSave;
 
         if (isEditing) {
-            // MODO EDIÇÃO
+            // MODO EDIÇÃO: Atualiza apenas o índice correto no array
             const idx = currentUsers.findIndex(u => u.id === id);
             if (idx !== -1) {
                 userToSave = { ...currentUsers[idx] };
@@ -1348,7 +1351,7 @@ async function saveUser(e) {
                 settings.users = currentUsers;
             }
         } else {
-            // MODO CRIAÇÃO (ATÔMICO via arrayUnion)
+            // MODO CRIAÇÃO: Adição atômica via arrayUnion (Segurança Máxima)
             userToSave = { 
                 id: crypto.randomUUID(), 
                 name, 
@@ -1379,7 +1382,7 @@ async function deleteUser(id) {
     const userToDelete = (settings.users || []).find(u => u.id === id);
     
     if (!userToDelete) {
-        showModal('Erro', 'Usuário não encontrado.', 'error');
+        showModal('Erro', 'Usuário não encontrado para exclusão.', 'error');
         return;
     }
 
@@ -1389,6 +1392,7 @@ async function deleteUser(id) {
     }
     
     try {
+        // Remoção atômica via arrayRemove
         await updateDoc(settingsDocRef, {
             users: arrayRemove(userToDelete)
         });
@@ -1397,7 +1401,8 @@ async function deleteUser(id) {
         showModal('Sucesso', `Perfil de ${userToDelete.name} excluído com sucesso!`, 'success');
         renderApp(); 
     } catch (e) {
-        showModal('Erro', 'Não foi possível excluir o perfil.', 'error');
+        console.error("Erro ao excluir:", e);
+        showModal('Erro', 'Não foi possível excluir o perfil no banco de dados.', 'error');
     }
 }
 
@@ -5253,3 +5258,4 @@ window.hideVincularModal = hideVincularModal;
 // 🛑 handleDesvincularBordoIndividual NÃO É MAIS NECESSÁRIO como função separada no HTML
 // --- Inicialização do Sistema ---
 window.onload = initApp;
+

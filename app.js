@@ -356,6 +356,67 @@ async function attachFirestoreListeners() {
     // 3. Força renderização (MOVIDO PARA DENTRO DA FUNÇÃO)
     handleHashChange();
 }
+async function attachFirestoreListeners() {
+    detachFirestoreListeners();	
+    if (!db || !appId || !currentUser) return; // Só anexa se estiver autenticado
+
+    // 1. Sincronizar Coleções
+    const collectionsToSync = {
+        'radios': (data) => dbRadios = data,
+        'equipamentos': (data) => dbEquipamentos = data,
+        'bordos': (data) => dbBordos = data, 
+        'registros': (data) => dbRegistros = data,
+        // [NOVO] Agora sincroniza a tabela separada de usuários
+        'users': (data) => {
+             // Atualiza a lista global e ordena por nome
+             settings.users = data.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+             
+             // Atualiza a tela sempre que houver mudanças
+             checkDuplicities();
+             if(!isLoggingIn) renderApp();
+        }
+    };
+
+    Object.keys(collectionsToSync).forEach(colName => {
+        const colPath = `artifacts/${appId}/public/data/${colName}`;
+        const q = query(collection(db, colPath));
+        
+        const unsub = onSnapshot(q, (querySnapshot) => {
+            const data = [];
+            querySnapshot.forEach((doc) => {
+                data.push({ id: doc.id, ...doc.data() });
+            });
+            
+            collectionsToSync[colName](data);	
+            
+        }, (error) => {
+            console.error(`Erro no listener de ${colName}:`, error);
+        });
+        firestoreListeners.push(unsub);
+    });
+
+    // 2. Listener para Solicitações Pendentes (Acesso: Apenas Admin)
+    if (currentUser.role === 'admin') {
+        const pendingColPath = `artifacts/${appId}/public/data/pending_approvals`;
+        const qPending = query(collection(db, pendingColPath));
+
+        const unsubPending = onSnapshot(qPending, (querySnapshot) => {
+            const data = [];
+            querySnapshot.forEach((doc) => {
+                data.push({ id: doc.id, ...doc.data() });
+            });
+            pendingUsers = data;
+            if(!isLoggingIn) renderApp();
+        }, (error) => {
+            console.error(`Erro no listener de pending_approvals:`, error);
+        });
+        firestoreListeners.push(unsubPending);
+    }
+    
+    // 3. Força renderização
+    handleHashChange();
+}
+
 async function saveSettings() {
     if (!db || !appId) return;
     // [CORREÇÃO] Usa appId hardcoded
@@ -5284,6 +5345,7 @@ window.hideVincularModal = hideVincularModal;
 // 🛑 handleDesvincularBordoIndividual NÃO É MAIS NECESSÁRIO como função separada no HTML
 // --- Inicialização do Sistema ---
 window.onload = initApp;
+
 
 
 

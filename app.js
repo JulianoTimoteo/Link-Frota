@@ -1245,18 +1245,19 @@ async function deleteDuplicity(collectionName, id) {
 
 // --- Funções de CRUD de Usuário (ATUALIZADO PARA CUSTOM LOGIN) ---
 
+function // --- Funções de CRUD de Usuário (CORRIGIDAS COM TRAVA DE SEGURANÇA E SEM ERROS DE SINTAXE) ---
+
 function loadUserForEdit(id) {
     const user = settings.users.find(u => u.id === id);
     if (user) {
         document.getElementById('user-id').value = user.id;
         document.getElementById('user-name').value = user.name;
-        document.getElementById('user-username').value = user.username; // Email
-        document.getElementById('user-custom-username').value = user.customUsername || ''; // NOVO: Nome de usuário
+        document.getElementById('user-username').value = user.username; 
+        document.getElementById('user-custom-username').value = user.customUsername || '';
         document.getElementById('user-role').value = user.role;
         
-        // Oculta o campo de senha para edição, a menos que o admin queira alterá-la.
         document.getElementById('user-password-field').classList.add('hidden');
-        document.getElementById('user-password').value = ''; 
+        document.getElementById('user-password').value = ''; 
 
         document.getElementById('user-form-title').textContent = 'Editar Perfil de Usuário';
         showModal('Edição', `Carregando perfil de ${user.name} para edição.`, 'info');
@@ -1265,8 +1266,6 @@ function loadUserForEdit(id) {
         showModal('Erro', 'Usuário não encontrado.', 'error');
     }
 }
-
-// --- Funções de CRUD de Usuário (CORRIGIDAS COM TRAVA DE SEGURANÇA E SINTAXE) ---
 
 async function saveUser(e) {
     e.preventDefault();
@@ -1277,7 +1276,6 @@ async function saveUser(e) {
     const password = document.getElementById('user-password').value;
     const role = document.getElementById('user-role').value;
     
-    // Validação inicial
     if (!name || !role) {
         showModal('Erro', 'Nome Completo e Perfil são obrigatórios.', 'error');
         return; 
@@ -1294,7 +1292,6 @@ async function saveUser(e) {
     const isEditing = !!id;
     const usersFromDB = settings.users || []; 
 
-    // Verificação de duplicidade local
     const isDuplicate = usersFromDB.some(u => 
         (u.username === finalEmail || (customUsername && u.customUsername === customUsername)) && 
         (!isEditing || u.id !== id)
@@ -1305,7 +1302,6 @@ async function saveUser(e) {
         return;
     }
 
-    // Criação no Firebase Auth (Apenas para novos usuários)
     if (!isEditing) {
         if (password.length < 6) {
             showModal('Erro', 'A senha deve ter no mínimo 6 caracteres.', 'error');
@@ -1314,9 +1310,7 @@ async function saveUser(e) {
         try {
             await createUserWithEmailAndPassword(auth, finalEmail, password);
         } catch (authErr) {
-            if (authErr.code === 'auth/email-already-in-use') {
-                showModal('Aviso', `O login ${finalEmail} já existe no Firebase Auth. O perfil local será sincronizado.`, 'warning');
-            } else {
+            if (authErr.code !== 'auth/email-already-in-use') {
                 console.error("Erro Auth:", authErr);
                 showModal('Erro de Auth', `Não foi possível criar o login: ${authErr.message}`, 'error');
                 return; 
@@ -1327,10 +1321,10 @@ async function saveUser(e) {
     try {
         const settingsDocRef = doc(db, "artifacts", appId, "public", "data", "settings", "config");
 
-        // TRAVA DE SEGURANÇA: Lê o banco para garantir que os dados existem antes de alterar
+        // --- TRAVA DE SEGURANÇA CONTRA APAGAMENTO ---
         const snap = await getDoc(settingsDocRef);
         if (!snap.exists()) {
-            showModal('Erro', 'Documento de configuração não encontrado no Firestore.', 'error');
+            showModal('Erro', 'Configurações não encontradas no banco.', 'error');
             return;
         }
         
@@ -1339,7 +1333,7 @@ async function saveUser(e) {
         let userToSave;
 
         if (isEditing) {
-            // MODO EDIÇÃO: Atualiza o item específico no array
+            // MODO EDIÇÃO
             const idx = currentUsers.findIndex(u => u.id === id);
             if (idx !== -1) {
                 userToSave = { ...currentUsers[idx] };
@@ -1350,12 +1344,11 @@ async function saveUser(e) {
                 if (password.length >= 6 && customUsername) userToSave.loginPassword = password;
 
                 currentUsers[idx] = userToSave;
-                // Salva a lista atualizada
                 await updateDoc(settingsDocRef, { users: currentUsers });
-                settings.users = currentUsers; // Atualiza cache local
+                settings.users = currentUsers;
             }
         } else {
-            // MODO CRIAÇÃO: Adição atômica (Não apaga os outros usuários)
+            // MODO CRIAÇÃO (ATÔMICO via arrayUnion)
             userToSave = { 
                 id: crypto.randomUUID(), 
                 name, 
@@ -1366,19 +1359,18 @@ async function saveUser(e) {
             };
             if (customUsername) userToSave.loginPassword = password;
 
-            // arrayUnion garante que o item seja ADICIONADO sem mexer no que já existe
             await updateDoc(settingsDocRef, {
                 users: arrayUnion(userToSave)
             });
         }
 
-        showModal('Sucesso', `Perfil de ${name} salvo com sucesso!`, 'success');
+        showModal('Sucesso', `Perfil salvo com sucesso!`, 'success');
         renderApp();
         resetUserForm();
 
-    } catch (dbErr) {
-        console.error("Erro Firestore:", dbErr);
-        showModal('Erro de Banco', 'Não foi possível salvar os dados. Verifique suas permissões.', 'error');
+    } catch (e) {
+        console.error("Erro Firestore:", e);
+        showModal('Erro de Permissão', 'Não foi possível salvar os dados. Verifique suas permissões.', 'error');
     }
 }
 
@@ -1387,7 +1379,7 @@ async function deleteUser(id) {
     const userToDelete = (settings.users || []).find(u => u.id === id);
     
     if (!userToDelete) {
-        showModal('Erro', 'Usuário não encontrado para exclusão.', 'error');
+        showModal('Erro', 'Usuário não encontrado.', 'error');
         return;
     }
 
@@ -1397,7 +1389,6 @@ async function deleteUser(id) {
     }
     
     try {
-        // Remoção Atômica: Remove apenas o objeto exato
         await updateDoc(settingsDocRef, {
             users: arrayRemove(userToDelete)
         });
@@ -1406,8 +1397,7 @@ async function deleteUser(id) {
         showModal('Sucesso', `Perfil de ${userToDelete.name} excluído com sucesso!`, 'success');
         renderApp(); 
     } catch (e) {
-        console.error("Erro ao excluir:", e);
-        showModal('Erro', 'Não foi possível excluir o perfil no banco de dados.', 'error');
+        showModal('Erro', 'Não foi possível excluir o perfil.', 'error');
     }
 }
 
@@ -1422,7 +1412,6 @@ function resetUserForm() {
         if(passField) passField.classList.remove('hidden');
     }
 }
-
     // 2. Verificar se já existe uma solicitação pendente com este email
     // [CORREÇÃO] Usa appId hardcoded
     const pendingColRef = collection(db, `artifacts/${appId}/public/data/pending_approvals`);
@@ -5264,7 +5253,3 @@ window.hideVincularModal = hideVincularModal;
 // 🛑 handleDesvincularBordoIndividual NÃO É MAIS NECESSÁRIO como função separada no HTML
 // --- Inicialização do Sistema ---
 window.onload = initApp;
-
-
-
-

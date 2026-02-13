@@ -1331,48 +1331,107 @@ async function deleteUser(id) {
     }
 }
 
+// --- Função para solicitar acesso (CORRIGIDA, COMPLETA E FECHADA) ---
 async function handleSolicitarAcesso(e) {
     e.preventDefault();
+    
     const form = e.target;
     const nome = form['solicitar-name'].value.trim();
     const email = form['solicitar-email'].value.trim();
-    const phone = form['solicitar-phone'].value.trim();
-    const pass = form['solicitar-temp-password'].value.trim();
+    const telefone = form['solicitar-phone'].value.trim();
+    const senhaProvisoria = form['solicitar-temp-password'].value.trim();
 
-    if (!nome || !email || !pass) {
-        showModal('Erro', 'Preencha os campos obrigatórios.', 'error');
+    if (!nome || !email || !telefone || !senhaProvisoria) {
+        showModal('Erro', 'Todos os campos são obrigatórios.', 'error');
         return;
     }
 
     try {
+        // 1. Verificar se o email já está aprovado na lista local
+        const appUser = (settings.users || []).find(u => u.username === email);
+        if (appUser) {
+            showModal('Acesso Já Aprovado', 'Este email já possui um perfil aprovado. Tente o login.', 'info');
+            return;
+        }
+
+        // 2. Verificar se já existe uma solicitação pendente no banco
         const pendingColRef = collection(db, `artifacts/${appId}/public/data/pending_approvals`);
-        await addDoc(pendingColRef, { 
-            name: nome, email, phone, tempPassword: pass, createdAt: new Date().toISOString() 
+        const q = query(pendingColRef, where("email", "==", email));
+        const pendingSnap = await getDocs(q);
+        
+        if (!pendingSnap.empty) {
+            showModal('Solicitação Pendente', 'Este email já possui uma solicitação de acesso pendente. Aguarde a análise do administrador.', 'warning');
+            return;
+        }
+
+        // 3. Envia a nova solicitação para o Firestore
+        await addDoc(pendingColRef, {
+            name: nome,
+            email: email,
+            phone: telefone,
+            tempPassword: senhaProvisoria,
+            createdAt: new Date().toISOString()
         });
-        showModal('Enviado', 'Solicitação enviada. Aguarde aprovação.', 'success');
+
+        showModal('Solicitação Enviada', `Sua solicitação de acesso foi enviada com sucesso para aprovação.`, 'success');
+        
         form.reset();
         updateState('loginView', 'login');
+    
     } catch (error) {
-        showModal('Erro', 'Falha ao enviar solicitação.', 'error');
+        console.error("Erro ao solicitar acesso:", error);
+        showModal('Erro', 'Ocorreu um erro ao enviar sua solicitação.', 'error');
     }
 }
 
+// --- Função para Aprovar Usuário (Garante atomicidade e evita apagamento) ---
 async function approveUser(pendingId, name, email, tempPassword) {
+    if (!currentUser || currentUser.role !== 'admin') return;
+
     try {
+        // Cria no Firebase Auth
         await createUserWithEmailAndPassword(auth, email, tempPassword);
+
         const settingsDocRef = doc(db, "artifacts", appId, "public", "data", "settings", "config");
+        
+        // Novo objeto de usuário
         const newUser = { 
-            id: crypto.randomUUID(), name, username: email, role: 'user', 
-            permissions: { dashboard: true, cadastro: true, pesquisa: true, settings: false }
+            id: crypto.randomUUID(), 
+            name: name, 
+            username: email, 
+            role: 'user', 
+            permissions: { dashboard: true, cadastro: true, pesquisa: true, settings: false } 
         };
+
         const batch = writeBatch(db);
-        batch.update(settingsDocRef, { users: arrayUnion(newUser) });
-        batch.delete(doc(db, `artifacts/${appId}/public/data/pending_approvals`, pendingId));
+        
+        // Adiciona ao array sem sobrescrever o documento inteiro
+        batch.update(settingsDocRef, {
+            users: arrayUnion(newUser)
+        });
+
+        // Remove da lista de pendentes
+        const pendingDocRef = doc(db, `artifacts/${appId}/public/data/pending_approvals`, pendingId);
+        batch.delete(pendingDocRef);
+
         await batch.commit();
-        showModal('Sucesso', 'Usuário aprovado e criado!', 'success');
+        
+        showModal('Sucesso', `Usuário ${name} aprovado!`, 'success');
         renderApp();
     } catch (e) {
-        showModal('Erro', 'Falha na aprovação: ' + e.message, 'error');
+        console.error("Erro na aprovação:", e);
+        showModal('Erro', 'Falha ao aprovar usuário: ' + e.message, 'error');
+    }
+}
+
+async function rejectUser(id, name) {
+    try {
+        const pendingDocRef = doc(db, `artifacts/${appId}/public/data/pending_approvals`, id);
+        await deleteDoc(pendingDocRef);
+        showModal('Removido', `Solicitação de ${name} removida.`, 'info');
+        renderApp();
+    } catch (e) {
+        showModal('Erro', 'Falha ao remover solicitação.', 'error');
     }
 }
 
@@ -5224,6 +5283,7 @@ window.hideVincularModal = hideVincularModal;
 // 🛑 handleDesvincularBordoIndividual NÃO É MAIS NECESSÁRIO como função separada no HTML
 // --- Inicialização do Sistema ---
 window.onload = initApp;
+
 
 
 

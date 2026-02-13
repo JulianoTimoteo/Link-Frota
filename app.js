@@ -1266,6 +1266,8 @@ function loadUserForEdit(id) {
     }
 }
 
+// --- Funções de CRUD de Usuário (CORRIGIDAS PARA EVITAR SOBREESCRITA) ---
+
 async function saveUser(e) {
     e.preventDefault();
     const id = document.getElementById('user-id').value;
@@ -1281,30 +1283,25 @@ async function saveUser(e) {
     }
 
     let finalEmail = email;
-    if (customUsername) {
-        if (!finalEmail) {
-            finalEmail = createGenericEmail(customUsername, appId);
-        }
-    } else {
-        if (!finalEmail || !isEmail(finalEmail)) {
-            showModal('Erro', 'É necessário informar um Email válido ou um Nome de Usuário.', 'error');
-            return;
-        }
+    if (customUsername && !finalEmail) {
+        finalEmail = createGenericEmail(customUsername, appId);
     }
 
     const isEditing = !!id;
     const usersFromDB = settings.users; 
 
+    // Validação de Duplicidade
     const isDuplicate = usersFromDB.some(u => 
         (u.username === finalEmail || (customUsername && u.customUsername === customUsername)) && 
         (!isEditing || u.id !== id)
     );
 
     if (isDuplicate) {
-        showModal('Erro', `Este usuário ou email (${finalEmail}) já está cadastrado no sistema.`, 'error');
+        showModal('Erro', `Este usuário ou email (${finalEmail}) já está cadastrado.`, 'error');
         return;
     }
 
+    // Criar Login no Firebase Auth se for novo usuário
     if (!isEditing) {
         if (password.length < 6) {
             showModal('Erro', 'A senha deve ter no mínimo 6 caracteres.', 'error');
@@ -1313,137 +1310,98 @@ async function saveUser(e) {
         try {
             await createUserWithEmailAndPassword(auth, finalEmail, password);
         } catch (e) {
-            if (e.code === 'auth/email-already-in-use') {
-                showModal('Aviso', `O login ${finalEmail} já existe no Firebase Auth. O perfil local será apenas criado/sincronizado.`, 'warning');
-            } else {
-                console.error(e);
-                showModal('Erro de Auth', `Não foi possível criar o login: ${e.message}`, 'error');
+            if (e.code !== 'auth/email-already-in-use') {
+                showModal('Erro de Auth', `Falha ao criar login: ${e.message}`, 'error');
                 return; 
             }
         }
     }
 
-    let userToSave;
-    
-    if (isEditing) {
-        userToSave = usersFromDB.find(u => u.id === id);
-        if (!userToSave) {
-            showModal('Erro', 'Usuário original não encontrado.', 'error');
-            return;
-        }
-        userToSave.name = name;
-        userToSave.username = finalEmail;
-        userToSave.customUsername = customUsername;
-        userToSave.role = role;
-
-        if (password.length >= 6 && customUsername) {
-            userToSave.loginPassword = password; 
-        }
-    } else {
-        userToSave = { 
-            id: crypto.randomUUID(), 
-            name, 
-            username: finalEmail, 
-            customUsername, 
-            role, 
-            permissions: { dashboard: true, cadastro: true, pesquisa: true, settings: role === 'admin' }
-        };
-        if (customUsername) {
-            userToSave.loginPassword = password;
-        }
-        // Adiciona na lista local para refletir na UI imediatamente, mas o arrayUnion garante o banco
-        // (Se não for duplicado visualmente)
-        if (!usersFromDB.some(u => u.id === userToSave.id)) {
-             usersFromDB.push(userToSave);
-        }
-    }
-
-    // --- CORREÇÃO FEITA AQUI: Descomentei o try ---
     try {
         const settingsDocRef = doc(db, "artifacts", appId, "public", "data", "settings", "config");
 
         if (isEditing) {
-            // --- MODO EDIÇÃO ---
+            // MODO EDIÇÃO: Substitui o item específico no array
             const snap = await getDoc(settingsDocRef);
             let currentUsers = snap.exists() ? snap.data().users || [] : [];
-
             const idx = currentUsers.findIndex(u => u.id === id);
-            if (idx !== -1) {
-                currentUsers[idx] = userToSave;
-            } else {
-                currentUsers.push(userToSave);
-            }
-
-            await setDoc(settingsDocRef, { users: currentUsers }, { merge: true });
-            settings.users = currentUsers;
-
-        } else {
-            // --- MODO CRIAÇÃO ---
-            await setDoc(settingsDocRef, {
-                users: arrayUnion(userToSave)
-            }, { merge: true });
             
-            // Não precisamos dar push no settings.users aqui porque já fizemos lá em cima no objeto userToSave
+            if (idx !== -1) {
+                const updatedUser = {
+                    ...currentUsers[idx],
+                    name,
+                    username: finalEmail,
+                    customUsername,
+                    role
+                };
+                if (password.length >= 6 && customUsername) updatedUser.loginPassword = password;
+                
+                currentUsers[idx] = updatedUser;
+                await updateDoc(settingsDocRef, { users: currentUsers });
+                settings.users = currentUsers;
+            }
+        } else {
+            // MODO CRIAÇÃO: Adiciona sem mexer nos outros (ATÔMICO)
+            const newUser = { 
+                id: crypto.randomUUID(), 
+                name, 
+                username: finalEmail, 
+                customUsername, 
+                role, 
+                permissions: { dashboard: true, cadastro: true, pesquisa: true, settings: role === 'admin' }
+            };
+            if (customUsername) newUser.loginPassword = password;
+
+            await updateDoc(settingsDocRef, {
+                users: arrayUnion(newUser)
+            });
         }
 
-        showModal('Sucesso', `Perfil de ${name} salvo com sucesso! Login ativo.`, 'success');
+        showModal('Sucesso', `Perfil de ${name} salvo com sucesso!`, 'success');
         renderApp();
-        
-        setTimeout(() => {
-            const currentForm = document.getElementById('form-user');
-            if (currentForm) {
-                currentForm.reset();
-                document.getElementById('user-id').value = '';
-                const titleEl = document.getElementById('user-form-title');
-                if(titleEl) titleEl.textContent = 'Novo Perfil de Usuário';
-                const passField = document.getElementById('user-password-field');
-                if(passField) passField.classList.remove('hidden');
-            }
-        }, 100);
+        resetUserForm();
 
     } catch (e) {
         console.error("Erro ao salvar no Firestore:", e);
-        showModal('Erro', 'O login foi criado no Auth, mas houve falha ao salvar os dados no banco de dados.', 'error');
+        showModal('Erro', 'Erro ao sincronizar dados com o banco.', 'error');
     }
 }
 
-// app.js (Substituir a partir da linha 1386)
 async function deleteUser(id) {
     const settingsDocRef = doc(db, "artifacts", appId, "public", "data", "settings", "config");
-    
-    // 1. Precisamos encontrar o objeto EXATO do usuário para o arrayRemove
-    // (Usamos a lista local 'settings.users' que está em memória para isso)
     const userToDelete = settings.users.find(u => u.id === id);
     
     if (!userToDelete) {
-        showModal('Erro', 'Usuário não encontrado para exclusão.', 'error');
+        showModal('Erro', 'Usuário não encontrado.', 'error');
         return;
     }
 
-    const userName = userToDelete.name;
-    const userUsername = userToDelete.username;
-
-    // Bloqueia exclusão do admin principal
-    if (userUsername === ADMIN_PRINCIPAL_EMAIL) {
-        showModal('Bloqueado', 'O usuário principal (Admin) não pode ser excluído.', 'warning');
+    if (userToDelete.username === ADMIN_PRINCIPAL_EMAIL) {
+        showModal('Bloqueado', 'O administrador principal não pode ser excluído.', 'warning');
         return;
     }
     
     try {
-        // --- AQUI ESTÁ A CORREÇÃO DEFINITIVA ---
-        // Em vez de 'setDoc' com a lista modificada...
-        // ...usamos 'updateDoc' com 'arrayRemove'.
+        // Remoção Atômica: Remove apenas este objeto específico do array
         await updateDoc(settingsDocRef, {
             users: arrayRemove(userToDelete)
         });
 
-        // Atualiza a memória local (só depois que o banco confirmou)
         settings.users = settings.users.filter(u => u.id !== id);
-
-        showModal('Sucesso', `Perfil de ${userName} excluído com sucesso!`, 'success');
+        showModal('Sucesso', `Perfil excluído com sucesso!`, 'success');
         renderApp(); 
     } catch (e) {
-        showModal('Erro', 'Não foi possível excluir o perfil no banco de dados.', 'error');
+        showModal('Erro', 'Não foi possível excluir o perfil.', 'error');
+    }
+}
+
+function resetUserForm() {
+    const currentForm = document.getElementById('form-user');
+    if (currentForm) {
+        currentForm.reset();
+        document.getElementById('user-id').value = '';
+        document.getElementById('user-form-title').textContent = 'Novo Perfil de Usuário';
+        document.getElementById('user-password-field').classList.remove('hidden');
     }
 }
 
@@ -5386,3 +5344,4 @@ window.hideVincularModal = hideVincularModal;
 // 🛑 handleDesvincularBordoIndividual NÃO É MAIS NECESSÁRIO como função separada no HTML
 // --- Inicialização do Sistema ---
 window.onload = initApp;
+

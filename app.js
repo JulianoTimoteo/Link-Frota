@@ -5036,6 +5036,86 @@ async function processImportedData(collectionName, data) {
     }
 }
 
+// =============================================================================
+// --- FUNÇÕES DE INICIALIZAÇÃO E SUPORTE (RESTAURADAS) ---
+// =============================================================================
+
+async function loadInitialSettings() {
+    if (!db || !appId) return;
+    const settingsDocRef = doc(db, "artifacts", appId, "public", "data", "settings", "config");
+    try {
+        const settingsSnap = await getDoc(settingsDocRef);
+        if (settingsSnap.exists()) {
+            const data = settingsSnap.data();
+            settings.letterMap = data.letterMap || DEFAULT_LETTER_MAP;
+            settings.nextIndex = data.nextIndex || DEFAULT_NEXT_INDEX;
+            settings.users = data.users || []; 
+        } else {
+            console.warn("Documento de config não encontrado. Usando padrões locais.");
+            if (settings.users.length === 0) {
+                settings.users = [{ 
+                    id: crypto.randomUUID(), 
+                    name: "Admin Principal", 
+                    username: ADMIN_PRINCIPAL_EMAIL, 
+                    role: "admin",
+                    permissions: { dashboard: true, cadastro: true, pesquisa: true, settings: true }
+                }];
+            }
+            saveSettings(); 
+        }
+    } catch (e) {
+        console.error("Erro ao carregar configurações:", e);
+    }
+}
+
+async function handleSolicitarAcesso(e) {
+    e.preventDefault();
+    const form = e.target;
+    const nome = form['solicitar-name'].value.trim();
+    const email = form['solicitar-email'].value.trim();
+    const phone = form['solicitar-phone'].value.trim();
+    const pass = form['solicitar-temp-password'].value.trim();
+
+    try {
+        const pendingColRef = collection(db, `artifacts/${appId}/public/data/pending_approvals`);
+        await addDoc(pendingColRef, { 
+            name: nome, email, phone, tempPassword: pass, createdAt: new Date().toISOString() 
+        });
+        showModal('Solicitação Enviada', 'Aguarde a aprovação do administrador.', 'success');
+        form.reset();
+        updateState('loginView', 'login');
+    } catch (error) {
+        showModal('Erro', 'Falha ao enviar solicitação.', 'error');
+    }
+}
+
+async function approveUser(pendingId, name, email, tempPassword) {
+    try {
+        await createUserWithEmailAndPassword(auth, email, tempPassword);
+        const settingsDocRef = doc(db, "artifacts", appId, "public", "data", "settings", "config");
+        const newUser = { 
+            id: crypto.randomUUID(), name, username: email, role: 'user', 
+            permissions: { dashboard: true, cadastro: true, pesquisa: true, settings: false } 
+        };
+        await updateDoc(settingsDocRef, { users: arrayUnion(newUser) });
+        await deleteDoc(doc(db, `artifacts/${appId}/public/data/pending_approvals`, pendingId));
+        showModal('Sucesso', 'Usuário aprovado!', 'success');
+        renderApp();
+    } catch (e) {
+        showModal('Erro', 'Falha na aprovação: ' + e.message, 'error');
+    }
+}
+
+async function rejectUser(id, name) {
+    try {
+        await deleteDoc(doc(db, `artifacts/${appId}/public/data/pending_approvals`, id));
+        showModal('Removido', 'Solicitação descartada.', 'info');
+        renderApp();
+    } catch (e) { console.error(e); }
+}
+
+// =============================================================================
+
 // -------------------------------------------------------------------------------------
 
 // --- Inicialização ---
@@ -5089,8 +5169,6 @@ window.RADIO_IMPORT_INFO = RADIO_IMPORT_INFO;
 window.EQUIPAMENTO_IMPORT_INFO = EQUIPAMENTO_IMPORT_INFO;
 window.BORDO_IMPORT_INFO = BORDO_IMPORT_INFO; // 🌟 NOVO: Expondo constante de Bordo
 window.toggleTheme = toggleTheme;
-
-
 window.deleteLink = deleteLink;
 window.deleteDuplicity = deleteDuplicity;
 window.deleteDuplicityWrapper = (collectionName, id, value) => {
@@ -5102,6 +5180,7 @@ window.hideVincularModal = hideVincularModal;
 // 🛑 handleDesvincularBordoIndividual NÃO É MAIS NECESSÁRIO como função separada no HTML
 // --- Inicialização do Sistema ---
 window.onload = initApp;
+
 
 
 

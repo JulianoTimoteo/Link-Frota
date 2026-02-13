@@ -1243,7 +1243,7 @@ async function deleteDuplicity(collectionName, id) {
 }
 
 // =============================================================================
-// --- BLOCO UNIFICADO: GESTÃO DE USUÁRIOS E SOLICITAÇÕES (VERSÃO FINAL) ---
+// --- BLOCO INTEGRADO E FINAL: GESTÃO DE USUÁRIOS E SOLICITAÇÕES ---
 // =============================================================================
 
 function loadUserForEdit(id) {
@@ -1277,26 +1277,28 @@ async function saveUser(e) {
     }
 
     let finalEmail = email || (customUsername ? createGenericEmail(customUsername, appId) : '');
+    if (!finalEmail) {
+        showModal('Erro', 'Informe um Email ou Nome de Usuário.', 'error');
+        return;
+    }
+
     const isEditing = !!id;
 
     try {
         const settingsDocRef = doc(db, "artifacts", appId, "public", "data", "settings", "config");
-        
-        // TRAVA DE SEGURANÇA: Lê o banco antes de qualquer alteração
         const snap = await getDoc(settingsDocRef);
+        
         if (!snap.exists()) {
-            showModal('Erro Crítico', 'Não foi possível ler as configurações do banco. Operação cancelada para proteger os dados.', 'error');
+            showModal('Erro Crítico', 'Banco de dados inacessível. Operação cancelada.', 'error');
             return;
         }
 
         if (!isEditing) {
-            // Cria login no Auth
             await createUserWithEmailAndPassword(auth, finalEmail, password || '123456');
             const newUser = { 
                 id: crypto.randomUUID(), name, username: finalEmail, customUsername, role, 
                 permissions: { dashboard: true, cadastro: true, pesquisa: true, settings: role === 'admin' }
             };
-            // arrayUnion: Adiciona sem apagar ninguém
             await updateDoc(settingsDocRef, { users: arrayUnion(newUser) });
         } else {
             const currentUsers = snap.data().users || [];
@@ -1306,7 +1308,7 @@ async function saveUser(e) {
                 await updateDoc(settingsDocRef, { users: currentUsers });
             }
         }
-        showModal('Sucesso', 'Usuário salvo com sucesso!', 'success');
+        showModal('Sucesso', 'Perfil salvo!', 'success');
         renderApp();
         resetUserForm();
     } catch (err) {
@@ -1334,15 +1336,20 @@ async function handleSolicitarAcesso(e) {
     const form = e.target;
     const nome = form['solicitar-name'].value.trim();
     const email = form['solicitar-email'].value.trim();
-    const telefone = form['solicitar-phone'].value.trim();
-    const senha = form['solicitar-temp-password'].value.trim();
+    const phone = form['solicitar-phone'].value.trim();
+    const pass = form['solicitar-temp-password'].value.trim();
+
+    if (!nome || !email || !pass) {
+        showModal('Erro', 'Preencha os campos obrigatórios.', 'error');
+        return;
+    }
 
     try {
         const pendingColRef = collection(db, `artifacts/${appId}/public/data/pending_approvals`);
         await addDoc(pendingColRef, { 
-            name: nome, email, phone: telefone, tempPassword: senha, createdAt: new Date().toISOString() 
+            name: nome, email, phone, tempPassword: pass, createdAt: new Date().toISOString() 
         });
-        showModal('Solicitação Enviada', 'Aguarde a aprovação do administrador.', 'success');
+        showModal('Enviado', 'Solicitação enviada. Aguarde aprovação.', 'success');
         form.reset();
         updateState('loginView', 'login');
     } catch (error) {
@@ -1362,10 +1369,10 @@ async function approveUser(pendingId, name, email, tempPassword) {
         batch.update(settingsDocRef, { users: arrayUnion(newUser) });
         batch.delete(doc(db, `artifacts/${appId}/public/data/pending_approvals`, pendingId));
         await batch.commit();
-        showModal('Sucesso', 'Usuário aprovado!', 'success');
+        showModal('Sucesso', 'Usuário aprovado e criado!', 'success');
         renderApp();
     } catch (e) {
-        showModal('Erro', 'Falha na aprovação.', 'error');
+        showModal('Erro', 'Falha na aprovação: ' + e.message, 'error');
     }
 }
 
@@ -1373,7 +1380,6 @@ function resetUserForm() {
     const f = document.getElementById('form-user');
     if (f) { f.reset(); document.getElementById('user-id').value = ''; }
 }
-
 // =============================================================================
 
 // --- FIM DO BLOCO DE GESTÃO DE USUÁRIOS ---
@@ -5218,6 +5224,7 @@ window.hideVincularModal = hideVincularModal;
 // 🛑 handleDesvincularBordoIndividual NÃO É MAIS NECESSÁRIO como função separada no HTML
 // --- Inicialização do Sistema ---
 window.onload = initApp;
+
 
 
 

@@ -1242,13 +1242,6 @@ async function deleteDuplicity(collectionName, id) {
     }
 }
 
-
-// --- Funções de CRUD de Usuário (ATUALIZADO PARA CUSTOM LOGIN) ---
-
-function // --- Funções de CRUD de Usuário (CORRIGIDAS COM TRAVA DE SEGURANÇA E SEM ERROS DE SINTAXE) ---
-
-function // --- Funções de CRUD de Usuário (CORRIGIDAS COM TRAVA DE SEGURANÇA E SINTAXE) ---
-
 // --- BLOCO DEFINITIVO: GESTÃO DE USUÁRIOS ---
 
 function loadUserForEdit(id) {
@@ -5248,6 +5241,7 @@ window.hideVincularModal = hideVincularModal;
 // 🛑 handleDesvincularBordoIndividual NÃO É MAIS NECESSÁRIO como função separada no HTML
 // --- Inicialização do Sistema ---
 window.onload = initApp;
+
 
 
 

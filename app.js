@@ -1279,7 +1279,7 @@ async function saveUser(e) {
     
     if (!name || !role) {
         showModal('Erro', 'Nome Completo e Perfil são obrigatórios.', 'error');
-        return;
+        return; // Return válido: está dentro de uma função
     }
 
     let finalEmail = email;
@@ -1324,8 +1324,8 @@ async function saveUser(e) {
     try {
         const settingsDocRef = doc(db, "artifacts", appId, "public", "data", "settings", "config");
 
-        // TRAVA DE SEGURANÇA: Força leitura do banco para evitar sobrescrever com lista vazia
-        const snap = await getGetDoc(settingsDocRef);
+        // TRAVA DE SEGURANÇA: Força leitura do banco antes de salvar
+        const snap = await getDoc(settingsDocRef);
         if (!snap.exists()) {
             showModal('Erro', 'Configurações não encontradas no banco.', 'error');
             return;
@@ -1352,7 +1352,7 @@ async function saveUser(e) {
                 settings.users = currentUsers;
             }
         } else {
-            // MODO CRIAÇÃO (ATÔMICO)
+            // MODO CRIAÇÃO (ATÔMICO via arrayUnion)
             userToSave = { 
                 id: crypto.randomUUID(), 
                 name, 
@@ -1393,7 +1393,7 @@ async function deleteUser(id) {
     }
     
     try {
-        // Remoção Atômica
+        // Remoção Atômica via arrayRemove
         await updateDoc(settingsDocRef, {
             users: arrayRemove(userToDelete)
         });

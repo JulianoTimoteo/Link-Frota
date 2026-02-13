@@ -239,123 +239,6 @@ function checkDuplicities() {
     ).sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt)); 
 }
 
-
-// --- Funções de Utilitário e Estado ---
-function detachFirestoreListeners() {
-    firestoreListeners.forEach(unsub => unsub());
-    firestoreListeners = [];
-}
-
-/**
- * NOVO: Verifica se o valor é um email ou um nome de usuário.
- */
-function isEmail(value) {
-    return value.includes('@') && value.includes('.');
-}
-
-/**
- * NOVO: Cria um email genérico para uso no Firebase Auth
- */
-function createGenericEmail(customUsername, appId) {
-    // Garante que o username é seguro para ser a parte local do email
-    const safeUsername = customUsername.toLowerCase().replace(/[^a-z0-9]/g, '');
-    return `${safeUsername}@${appId}.fake`;
-}
-
-async function loadInitialSettings() {
-    if (!db || !appId) return;
-
-    const settingsDocRef = doc(db, "artifacts", appId, "public", "data", "settings", "config");
-    try {
-        // Tenta ler as configurações. A regra de segurança deve permitir a leitura para corrigir o erro inicial.
-        const settingsSnap = await getDoc(settingsDocRef);
-        if (settingsSnap.exists()) {
-            const data = settingsSnap.data();
-            settings.letterMap = data.letterMap || DEFAULT_LETTER_MAP;
-            settings.nextIndex = data.nextIndex || DEFAULT_NEXT_INDEX;
-            settings.users = data.users || []; 
-        } else {
-            console.warn("Documento de 'settings/config' não encontrado. Usando padrões locais.");
-            // Define um usuário admin padrão se não houver configurações
-            if (settings.users.length === 0) {
-                settings.users = [{ 
-                    id: crypto.randomUUID(), 
-                    name: "Juliano Timoteo (Admin Padrão)", 
-                    username: ADMIN_PRINCIPAL_EMAIL, 
-                    role: "admin",
-                    permissions: { dashboard: true, cadastro: true, pesquisa: true, settings: true }
-                }];
-            }
-            // Tenta salvar, permitindo que a aplicação se configure se as regras permitirem.
-            saveSettings();	
-        }
-    } catch (e) {
-        // Loga o erro, mas a aplicação continua com os valores padrão de settings.users (a contingência no auth listener será usada).
-        console.error("Erro ao carregar 'settings/config' na inicialização:", e);
-    }
-}
-
-
-async function attachFirestoreListeners() {
-    detachFirestoreListeners();	
-    if (!db || !appId || !currentUser) return; // Só anexa se estiver autenticado
-
-    // 1. Sincronizar Coleções
-    const collectionsToSync = {
-        'radios': (data) => dbRadios = data,
-        'equipamentos': (data) => dbEquipamentos = data,
-        'bordos': (data) => dbBordos = data, 
-        'registros': (data) => dbRegistros = data,
-        // [NOVO] Agora sincroniza a tabela separada de usuários
-        'users': (data) => {
-             // Atualiza a lista global e ordena por nome
-             settings.users = data.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-             
-             // Atualiza a tela sempre que houver mudanças
-             checkDuplicities();
-             if(!isLoggingIn) renderApp();
-        }
-    };
-
-    Object.keys(collectionsToSync).forEach(colName => {
-        const colPath = `artifacts/${appId}/public/data/${colName}`;
-        const q = query(collection(db, colPath));
-        
-        const unsub = onSnapshot(q, (querySnapshot) => {
-            const data = [];
-            querySnapshot.forEach((doc) => {
-                data.push({ id: doc.id, ...doc.data() });
-            });
-            
-            collectionsToSync[colName](data);	
-            
-        }, (error) => {
-            console.error(`Erro no listener de ${colName}:`, error);
-        });
-        firestoreListeners.push(unsub);
-    });
-
-    // 2. Listener para Solicitações Pendentes (Acesso: Apenas Admin)
-    if (currentUser.role === 'admin') {
-        const pendingColPath = `artifacts/${appId}/public/data/pending_approvals`;
-        const qPending = query(collection(db, pendingColPath));
-
-        const unsubPending = onSnapshot(qPending, (querySnapshot) => {
-            const data = [];
-            querySnapshot.forEach((doc) => {
-                data.push({ id: doc.id, ...doc.data() });
-            });
-            pendingUsers = data;
-            if(!isLoggingIn) renderApp();
-        }, (error) => {
-            console.error(`Erro no listener de pending_approvals:`, error);
-        });
-        firestoreListeners.push(unsubPending);
-    }
-    
-    // 3. Força renderização (MOVIDO PARA DENTRO DA FUNÇÃO)
-    handleHashChange();
-}
 async function attachFirestoreListeners() {
     detachFirestoreListeners();	
     if (!db || !appId || !currentUser) return; // Só anexa se estiver autenticado
@@ -5143,6 +5026,7 @@ window.hideVincularModal = hideVincularModal;
 // 🛑 handleDesvincularBordoIndividual NÃO É MAIS NECESSÁRIO como função separada no HTML
 // --- Inicialização do Sistema ---
 window.onload = initApp;
+
 
 
 

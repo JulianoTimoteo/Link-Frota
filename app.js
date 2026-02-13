@@ -1242,7 +1242,9 @@ async function deleteDuplicity(collectionName, id) {
     }
 }
 
-// --- INÍCIO DO BLOCO DE GESTÃO DE USUÁRIOS (LIMPO E CORRIGIDO) ---
+// =============================================================================
+// --- BLOCO UNIFICADO: GESTÃO DE USUÁRIOS E SOLICITAÇÕES (CORRIGIDO) ---
+// =============================================================================
 
 function loadUserForEdit(id) {
     const user = settings.users.find(u => u.id === id);
@@ -1252,15 +1254,11 @@ function loadUserForEdit(id) {
         document.getElementById('user-username').value = user.username; 
         document.getElementById('user-custom-username').value = user.customUsername || '';
         document.getElementById('user-role').value = user.role;
-        
         document.getElementById('user-password-field').classList.add('hidden');
         document.getElementById('user-password').value = ''; 
-
         document.getElementById('user-form-title').textContent = 'Editar Perfil de Usuário';
         showModal('Edição', `Carregando perfil de ${user.name} para edição.`, 'info');
         window.scrollTo(0, 0);
-    } else {
-        showModal('Erro', 'Usuário não encontrado.', 'error');
     }
 }
 
@@ -1278,126 +1276,85 @@ async function saveUser(e) {
         return; 
     }
 
-    let finalEmail = email;
-    if (customUsername && !finalEmail) {
-        finalEmail = createGenericEmail(customUsername, appId);
-    }
-
-    const isEditing = !!id;
-    const usersFromDB = settings.users || []; 
-
-    const isDuplicate = usersFromDB.some(u => 
-        (u.username === finalEmail || (customUsername && u.customUsername === customUsername)) && 
-        (!isEditing || u.id !== id)
-    );
-
-    if (isDuplicate) {
-        showModal('Erro', `Este usuário ou email (${finalEmail}) já está cadastrado no sistema.`, 'error');
+    let finalEmail = email || (customUsername ? createGenericEmail(customUsername, appId) : '');
+    if (!finalEmail) {
+        showModal('Erro', 'Email ou Usuário obrigatório.', 'error');
         return;
     }
 
-    if (!isEditing) {
-        if (password.length < 6) {
-            showModal('Erro', 'A senha deve ter no mínimo 6 caracteres.', 'error');
-            return;
-        }
-        try {
-            await createUserWithEmailAndPassword(auth, finalEmail, password);
-        } catch (authErr) {
-            if (authErr.code !== 'auth/email-already-in-use') {
-                showModal('Erro de Auth', `Falha ao criar login: ${authErr.message}`, 'error');
-                return; 
-            }
-        }
-    }
-
+    const isEditing = !!id;
     try {
         const settingsDocRef = doc(db, "artifacts", appId, "public", "data", "settings", "config");
-
-        // TRAVA DE SEGURANÇA: Lê o banco para garantir que os dados existem antes de salvar
         const snap = await getDoc(settingsDocRef);
+        
         if (!snap.exists()) {
-            showModal('Erro', 'Documento de configuração não encontrado no Firestore.', 'error');
+            showModal('Erro', 'Falha ao ler banco de dados. Operação cancelada para proteger dados.', 'error');
             return;
         }
-        
-        const currentData = snap.data();
-        const currentUsers = currentData.users || [];
-        let userToSave;
 
-        if (isEditing) {
-            const idx = currentUsers.findIndex(u => u.id === id);
-            if (idx !== -1) {
-                userToSave = { ...currentUsers[idx], name, username: finalEmail, customUsername, role };
-                if (password.length >= 6 && customUsername) userToSave.loginPassword = password;
-                currentUsers[idx] = userToSave;
-                await updateDoc(settingsDocRef, { users: currentUsers });
-                settings.users = currentUsers;
-            }
-        } else {
-            userToSave = { 
-                id: crypto.randomUUID(), 
-                name, 
-                username: finalEmail, 
-                customUsername, 
-                role, 
+        if (!isEditing) {
+            await createUserWithEmailAndPassword(auth, finalEmail, password || '123456');
+            const newUser = { 
+                id: crypto.randomUUID(), name, username: finalEmail, customUsername, role, 
                 permissions: { dashboard: true, cadastro: true, pesquisa: true, settings: role === 'admin' }
             };
-            if (customUsername) userToSave.loginPassword = password;
-
-            // arrayUnion: Adiciona sem apagar ninguém
-            await updateDoc(settingsDocRef, {
-                users: arrayUnion(userToSave)
-            });
+            await updateDoc(settingsDocRef, { users: arrayUnion(newUser) });
+        } else {
+            const currentUsers = snap.data().users || [];
+            const idx = currentUsers.findIndex(u => u.id === id);
+            if (idx !== -1) {
+                currentUsers[idx] = { ...currentUsers[idx], name, username: finalEmail, customUsername, role };
+                await updateDoc(settingsDocRef, { users: currentUsers });
+            }
         }
-
-        showModal('Sucesso', `Perfil de ${name} salvo com sucesso!`, 'success');
+        showModal('Sucesso', 'Usuário salvo com sucesso!', 'success');
         renderApp();
         resetUserForm();
-
-    } catch (dbErr) {
-        console.error("Erro Firestore:", dbErr);
-        showModal('Erro de Banco', 'Não foi possível salvar os dados. Verifique suas permissões.', 'error');
+    } catch (err) {
+        console.error(err);
+        showModal('Erro', 'Erro ao salvar: ' + err.message, 'error');
     }
 }
 
 async function deleteUser(id) {
-    const settingsDocRef = doc(db, "artifacts", appId, "public", "data", "settings", "config");
-    const userToDelete = (settings.users || []).find(u => u.id === id);
-    
-    if (!userToDelete) {
-        showModal('Erro', 'Usuário não encontrado para exclusão.', 'error');
-        return;
-    }
-
-    if (userToDelete.username === ADMIN_PRINCIPAL_EMAIL) {
-        showModal('Bloqueado', 'O administrador principal não pode ser excluído.', 'warning');
-        return;
-    }
+    const userToDelete = settings.users.find(u => u.id === id);
+    if (!userToDelete || userToDelete.username === ADMIN_PRINCIPAL_EMAIL) return;
     
     try {
-        await updateDoc(settingsDocRef, {
-            users: arrayRemove(userToDelete)
-        });
-        settings.users = settings.users.filter(u => u.id !== id);
-        showModal('Sucesso', `Perfil excluído com sucesso!`, 'success');
-        renderApp(); 
+        const settingsDocRef = doc(db, "artifacts", appId, "public", "data", "settings", "config");
+        await updateDoc(settingsDocRef, { users: arrayRemove(userToDelete) });
+        showModal('Sucesso', 'Usuário removido.', 'success');
+        renderApp();
     } catch (e) {
-        showModal('Erro', 'Não foi possível excluir o perfil.', 'error');
+        showModal('Erro', 'Falha ao excluir.', 'error');
+    }
+}
+
+async function handleSolicitarAcesso(e) {
+    e.preventDefault();
+    const form = e.target;
+    const nome = form['solicitar-name'].value.trim();
+    const email = form['solicitar-email'].value.trim();
+    const phone = form['solicitar-phone'].value.trim();
+    const pass = form['solicitar-temp-password'].value.trim();
+
+    try {
+        const pendingColRef = collection(db, `artifacts/${appId}/public/data/pending_approvals`);
+        await addDoc(pendingColRef, { name: nome, email, phone, tempPassword: pass, createdAt: new Date().toISOString() });
+        showModal('Enviado', 'Solicitação enviada para o administrador.', 'success');
+        form.reset();
+        updateState('loginView', 'login');
+    } catch (error) {
+        showModal('Erro', 'Falha ao enviar solicitação.', 'error');
     }
 }
 
 function resetUserForm() {
-    const currentForm = document.getElementById('form-user');
-    if (currentForm) {
-        currentForm.reset();
-        document.getElementById('user-id').value = '';
-        const titleEl = document.getElementById('user-form-title');
-        if(titleEl) titleEl.textContent = 'Novo Perfil de Usuário';
-        const passField = document.getElementById('user-password-field');
-        if(passField) passField.classList.remove('hidden');
-    }
+    const f = document.getElementById('form-user');
+    if (f) { f.reset(); document.getElementById('user-id').value = ''; }
 }
+
+// =============================================================================
 
 // --- FIM DO BLOCO DE GESTÃO DE USUÁRIOS ---
     // 2. Verificar se já existe uma solicitação pendente com este email
@@ -5241,6 +5198,7 @@ window.hideVincularModal = hideVincularModal;
 // 🛑 handleDesvincularBordoIndividual NÃO É MAIS NECESSÁRIO como função separada no HTML
 // --- Inicialização do Sistema ---
 window.onload = initApp;
+
 
 
 

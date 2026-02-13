@@ -1393,78 +1393,6 @@ async function deleteUser(id) {
     }
 }
 
-// --- Função para solicitar acesso (CORRIGIDA, COMPLETA E FECHADA) ---
-async function handleSolicitarAcesso(e) {
-    e.preventDefault();
-    
-    const form = e.target;
-    const nome = form['solicitar-name'].value.trim();
-    const email = form['solicitar-email'].value.trim();
-    const telefone = form['solicitar-phone'].value.trim();
-    const senhaProvisoria = form['solicitar-temp-password'].value.trim();
-
-    if (!nome || !email || !telefone || !senhaProvisoria) {
-        showModal('Erro', 'Todos os campos são obrigatórios.', 'error');
-        return;
-    }
-
-    try {
-        // 1. Verificar se o email já está aprovado na lista local
-        const appUser = (settings.users || []).find(u => u.username === email);
-        if (appUser) {
-            showModal('Acesso Já Aprovado', 'Este email já possui um perfil aprovado. Tente o login.', 'info');
-            return;
-        }
-    const pendingListHTML = pendingUsers.length > 0 ? 
-        pendingUsers.map(u => `
-            <div class="flex items-center justify-between p-3 border-b border-gray-100 last:border-b-0 bg-white dark:bg-gray-700 rounded-lg shadow-sm">
-                <div>
-                    <p class="font-semibold text-gray-800 dark:text-gray-100">${u.name}</p>
-                    <p class="text-xs text-gray-500 dark:text-gray-300">${u.email}</p>
-                    <p class="text-xs text-gray-500 dark:text-gray-300">Telefone: ${u.phone || 'N/A'}</p>
-                    <p class="text-xs text-gray-500 dark:text-gray-300">Senha Provisória: ${u.tempPassword || 'N/A'}</p>
-                    <p class="text-xs text-gray-500 dark:text-gray-300">Solicitado em: ${new Date(u.createdAt).toLocaleDateString()} ${new Date(u.createdAt).toLocaleTimeString()}</p>
-                </div>
-                <div class="flex space-x-2">
-                    <button onclick="approveUserWrapper('${u.id}', '${u.name}', '${u.email}', '${u.tempPassword}')" class="px-3 py-1 text-xs bg-green-main text-white rounded-lg hover:bg-green-700 shadow-md transition-colors">
-                        Aprovar
-                    </button>
-                    <button onclick="rejectUserWrapper('${u.id}', '${u.name}')" class="px-3 py-1 text-xs bg-red-500 text-white rounded-lg hover:bg-red-600 shadow-md transition-colors">
-                        Negar
-                    </button>
-                </div>
-            </div>
-        `).join('')
-        : '<p class="text-gray-500 dark:text-gray-400 text-center py-4">Nenhuma solicitação de acesso pendente.</p>';
-
-    const modal = document.getElementById('global-modal');
-    const titleEl = document.getElementById('modal-title');
-    const messageEl = document.getElementById('modal-message');
-    const actionsEl = document.getElementById('modal-actions');
-
-    titleEl.textContent = `Aprovações Pendentes (${pendingUsers.length})`;
-    // Remove a classe 'max-w-sm' do modal principal para permitir mais espaço
-    modal.querySelector('div').classList.remove('max-w-sm');
-    modal.querySelector('div').classList.add('max-w-lg'); 
-    
-    messageEl.innerHTML = `
-        <p class="text-sm text-gray-600 dark:text-gray-300 mb-4">Novos usuários aguardam sua aprovação.</p>
-        <div class="max-h-80 overflow-y-auto space-y-3 p-2 bg-gray-50 dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700">
-            ${pendingListHTML}
-        </div>
-    `;
-    titleEl.className = `text-xl font-bold mb-3 ${pendingUsers.length > 0 ? 'text-yellow-600' : 'text-gray-800 dark:text-gray-100'}`;
-
-    actionsEl.innerHTML = `
-        <button onclick="hideModal(); document.getElementById('global-modal').querySelector('div').classList.remove('max-w-lg'); document.getElementById('global-modal').querySelector('div').classList.add('max-w-sm');" 
-                class="px-3 py-1.5 text-sm bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 font-semibold rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors shadow-md">
-            Fechar
-        </button>
-    `;
-    modal.classList.remove('hidden');
-    modal.classList.add('flex');
-}
-
 // Wrappers para lidar com aspas em strings
 window.approveUserWrapper = (id, name, email, tempPassword) => {
     showConfirmModal('Confirmar Aprovação', `Deseja aprovar o acesso de <b>${name}</b>? Ele receberá permissões de 'Usuário Padrão' e será criado no Auth com a senha provisória.`, () => approveUser(id, name, email, tempPassword));
@@ -5215,6 +5143,7 @@ window.hideVincularModal = hideVincularModal;
 // 🛑 handleDesvincularBordoIndividual NÃO É MAIS NECESSÁRIO como função separada no HTML
 // --- Inicialização do Sistema ---
 window.onload = initApp;
+
 
 
 

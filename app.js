@@ -352,9 +352,10 @@ async function attachFirestoreListeners() {
         });
         firestoreListeners.push(unsubPending);
     }
-}
-    // 3. Força renderização
+    
+    // 3. Força renderização (MOVIDO PARA DENTRO DA FUNÇÃO)
     handleHashChange();
+}
 async function saveSettings() {
     if (!db || !appId) return;
     // [CORREÇÃO] Usa appId hardcoded
@@ -5283,6 +5284,7 @@ window.hideVincularModal = hideVincularModal;
 // 🛑 handleDesvincularBordoIndividual NÃO É MAIS NECESSÁRIO como função separada no HTML
 // --- Inicialização do Sistema ---
 window.onload = initApp;
+
 
 
 

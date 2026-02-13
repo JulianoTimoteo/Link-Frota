@@ -1277,9 +1277,10 @@ async function saveUser(e) {
     const password = document.getElementById('user-password').value;
     const role = document.getElementById('user-role').value;
     
+    // Validação básica
     if (!name || !role) {
         showModal('Erro', 'Nome Completo e Perfil são obrigatórios.', 'error');
-        return; // Return válido: está dentro de uma função
+        return; 
     }
 
     let finalEmail = email;
@@ -1291,8 +1292,9 @@ async function saveUser(e) {
     }
 
     const isEditing = !!id;
-    const usersFromDB = settings.users; 
+    const usersFromDB = settings.users || []; 
 
+    // Checagem de duplicidade
     const isDuplicate = usersFromDB.some(u => 
         (u.username === finalEmail || (customUsername && u.customUsername === customUsername)) && 
         (!isEditing || u.id !== id)
@@ -1303,6 +1305,7 @@ async function saveUser(e) {
         return;
     }
 
+    // Gerenciamento no Firebase Auth para novos usuários
     if (!isEditing) {
         if (password.length < 6) {
             showModal('Erro', 'A senha deve ter no mínimo 6 caracteres.', 'error');
@@ -1310,12 +1313,12 @@ async function saveUser(e) {
         }
         try {
             await createUserWithEmailAndPassword(auth, finalEmail, password);
-        } catch (e) {
-            if (e.code === 'auth/email-already-in-use') {
-                showModal('Aviso', `O login ${finalEmail} já existe no Firebase Auth. O perfil local será apenas criado/sincronizado.`, 'warning');
+        } catch (authError) {
+            if (authError.code === 'auth/email-already-in-use') {
+                showModal('Aviso', `O login ${finalEmail} já existe no Firebase Auth. O perfil local será apenas sincronizado.`, 'warning');
             } else {
-                console.error(e);
-                showModal('Erro de Auth', `Não foi possível criar o login: ${e.message}`, 'error');
+                console.error("Erro de Auth:", authError);
+                showModal('Erro de Auth', `Não foi possível criar o login: ${authError.message}`, 'error');
                 return; 
             }
         }
@@ -1324,7 +1327,7 @@ async function saveUser(e) {
     try {
         const settingsDocRef = doc(db, "artifacts", appId, "public", "data", "settings", "config");
 
-        // TRAVA DE SEGURANÇA: Força leitura do banco antes de salvar
+        // TRAVA DE SEGURANÇA: Força leitura do banco antes de salvar para evitar lista vazia
         const snap = await getDoc(settingsDocRef);
         if (!snap.exists()) {
             showModal('Erro', 'Configurações não encontradas no banco.', 'error');
@@ -1333,11 +1336,10 @@ async function saveUser(e) {
         
         const currentData = snap.data();
         const currentUsers = currentData.users || [];
-
         let userToSave;
 
         if (isEditing) {
-            // MODO EDIÇÃO
+            // MODO EDIÇÃO: Atualiza o item específico
             const idx = currentUsers.findIndex(u => u.id === id);
             if (idx !== -1) {
                 userToSave = { ...currentUsers[idx] };
@@ -1349,10 +1351,10 @@ async function saveUser(e) {
 
                 currentUsers[idx] = userToSave;
                 await updateDoc(settingsDocRef, { users: currentUsers });
-                settings.users = currentUsers;
+                settings.users = currentUsers; // Sincroniza memória local
             }
         } else {
-            // MODO CRIAÇÃO (ATÔMICO via arrayUnion)
+            // MODO CRIAÇÃO: Adição atômica (Não sobrescreve outros usuários)
             userToSave = { 
                 id: crypto.randomUUID(), 
                 name, 
@@ -1372,15 +1374,15 @@ async function saveUser(e) {
         renderApp();
         resetUserForm();
 
-    } catch (e) {
-        console.error("Erro crítico ao salvar no Firestore:", e);
-        showModal('Erro de Permissão', 'Não foi possível salvar os dados. Verifique sua conexão ou permissões de administrador.', 'error');
+    } catch (dbError) {
+        console.error("Erro ao salvar no Firestore:", dbError);
+        showModal('Erro de Banco', 'Não foi possível salvar os dados. Verifique suas permissões de administrador.', 'error');
     }
 }
 
 async function deleteUser(id) {
     const settingsDocRef = doc(db, "artifacts", appId, "public", "data", "settings", "config");
-    const userToDelete = settings.users.find(u => u.id === id);
+    const userToDelete = (settings.users || []).find(u => u.id === id);
     
     if (!userToDelete) {
         showModal('Erro', 'Usuário não encontrado para exclusão.', 'error');
@@ -1393,7 +1395,7 @@ async function deleteUser(id) {
     }
     
     try {
-        // Remoção Atômica via arrayRemove
+        // Remoção Atômica: Remove apenas este objeto exato
         await updateDoc(settingsDocRef, {
             users: arrayRemove(userToDelete)
         });
@@ -5260,5 +5262,6 @@ window.hideVincularModal = hideVincularModal;
 // 🛑 handleDesvincularBordoIndividual NÃO É MAIS NECESSÁRIO como função separada no HTML
 // --- Inicialização do Sistema ---
 window.onload = initApp;
+
 
 

@@ -1415,136 +1415,6 @@ async function handleSolicitarAcesso(e) {
             showModal('Acesso Já Aprovado', 'Este email já possui um perfil aprovado. Tente o login.', 'info');
             return;
         }
-
-        // 2. Verificar se já existe uma solicitação pendente no banco
-        const pendingColRef = collection(db, `artifacts/${appId}/public/data/pending_approvals`);
-        const q = query(pendingColRef, where("email", "==", email));
-        const pendingSnap = await getDocs(q);
-        
-        if (!pendingSnap.empty) {
-            showModal('Solicitação Pendente', 'Este email já possui uma solicitação de acesso pendente. Aguarde a análise do administrador.', 'warning');
-            return;
-        }
-
-        // 3. Envia a nova solicitação para o Firestore
-        await addDoc(pendingColRef, {
-            name: nome,
-            email: email,
-            phone: telefone,
-            tempPassword: senhaProvisoria,
-            createdAt: new Date().toISOString()
-        });
-
-        showModal('Solicitação Enviada', `Sua solicitação de acesso foi enviada com sucesso para aprovação.`, 'success');
-        
-        form.reset();
-        updateState('loginView', 'login');
-    
-    } catch (error) {
-        console.error("Erro ao solicitar acesso:", error);
-        showModal('Erro', 'Ocorreu um erro ao enviar sua solicitação.', 'error');
-    }
-}
-
-// --- Função para Aprovar Usuário (Garante atomicidade e evita apagamento) ---
-async function approveUser(pendingId, name, email, tempPassword) {
-    if (!currentUser || currentUser.role !== 'admin') return;
-
-    try {
-        // Cria no Firebase Auth
-        await createUserWithEmailAndPassword(auth, email, tempPassword);
-
-        const settingsDocRef = doc(db, "artifacts", appId, "public", "data", "settings", "config");
-        
-        // Novo objeto de usuário
-        const newUser = { 
-            id: crypto.randomUUID(), 
-            name: name, 
-            username: email, 
-            role: 'user', 
-            permissions: { dashboard: true, cadastro: true, pesquisa: true, settings: false } 
-        };
-
-        const batch = writeBatch(db);
-        
-        // Adiciona ao array sem sobrescrever o documento inteiro
-        batch.update(settingsDocRef, {
-            users: arrayUnion(newUser)
-        });
-
-        // Remove da lista de pendentes
-        const pendingDocRef = doc(db, `artifacts/${appId}/public/data/pending_approvals`, pendingId);
-        batch.delete(pendingDocRef);
-
-        await batch.commit();
-        
-        showModal('Sucesso', `Usuário ${name} aprovado!`, 'success');
-        renderApp();
-    } catch (e) {
-        console.error("Erro na aprovação:", e);
-        showModal('Erro', 'Falha ao aprovar usuário: ' + e.message, 'error');
-    }
-}
-
-async function rejectUser(id, name) {
-    try {
-        const pendingDocRef = doc(db, `artifacts/${appId}/public/data/pending_approvals`, id);
-        await deleteDoc(pendingDocRef);
-        showModal('Removido', `Solicitação de ${name} removida.`, 'info');
-        renderApp();
-    } catch (e) {
-        showModal('Erro', 'Falha ao remover solicitação.', 'error');
-    }
-}
-
-function resetUserForm() {
-    const f = document.getElementById('form-user');
-    if (f) { f.reset(); document.getElementById('user-id').value = ''; }
-}
-// =============================================================================
-
-// --- FIM DO BLOCO DE GESTÃO DE USUÁRIOS ---
-    // 2. Verificar se já existe uma solicitação pendente com este email
-    // [CORREÇÃO] Usa appId hardcoded
-    const pendingColRef = collection(db, `artifacts/${appId}/public/data/pending_approvals`);
-    const q = query(pendingColRef, where("email", "==", email));
-    const pendingSnap = await getDocs(q);
-    
-    if (!pendingSnap.empty) {
-        showModal('Solicitação Pendente', 'Este email já possui uma solicitação de acesso pendente. Aguarde a aprovação do administrador.', 'warning');
-        return;
-    }
-
-    try {
-        // 3. Envia a nova solicitação para o Firestore (Permissão permitida para qualquer usuário - Regra 1)
-        await addDoc(pendingColRef, {
-            name: nome,
-            email: email,
-            phone: telefone,
-            tempPassword: senhaProvisoria, // A senha provisória é apenas para referência do Admin
-            createdAt: new Date().toISOString()
-        });
-
-        showModal('Solicitação Enviada', 
-            `Sua solicitação de acesso foi enviada com sucesso para aprovação. Você será notificado após a análise.`, 
-            'success');
-        
-        // Volta para a tela de login principal
-        form.reset();
-        updateState('loginView', 'login');
-    
-    } catch (error) {
-        showModal('Erro', 'Ocorreu um erro ao enviar sua solicitação.', 'error');
-    }
-}
-
-function renderPendingApprovalsModal() {
-    // Regra 1 permite apenas Admin Principal ler a coleção, mas vamos checar a role localmente
-    if (currentUser.role !== 'admin') {
-        showModal('Acesso Negado', 'Apenas administradores podem visualizar as solicitações de acesso.', 'error');
-        return;
-    }
-
     const pendingListHTML = pendingUsers.length > 0 ? 
         pendingUsers.map(u => `
             <div class="flex items-center justify-between p-3 border-b border-gray-100 last:border-b-0 bg-white dark:bg-gray-700 rounded-lg shadow-sm">
@@ -5345,6 +5215,7 @@ window.hideVincularModal = hideVincularModal;
 // 🛑 handleDesvincularBordoIndividual NÃO É MAIS NECESSÁRIO como função separada no HTML
 // --- Inicialização do Sistema ---
 window.onload = initApp;
+
 
 
 

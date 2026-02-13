@@ -1243,7 +1243,7 @@ async function deleteDuplicity(collectionName, id) {
 }
 
 // =============================================================================
-// --- BLOCO UNIFICADO: GESTÃO DE USUÁRIOS E SOLICITAÇÕES (CORRIGIDO) ---
+// --- BLOCO UNIFICADO: GESTÃO DE USUÁRIOS E SOLICITAÇÕES (VERSÃO FINAL) ---
 // =============================================================================
 
 function loadUserForEdit(id) {
@@ -1266,7 +1266,7 @@ async function saveUser(e) {
     e.preventDefault();
     const id = document.getElementById('user-id').value;
     const name = document.getElementById('user-name').value.trim();
-    let email = document.getElementById('user-username').value.trim();
+    const email = document.getElementById('user-username').value.trim();
     const customUsername = document.getElementById('user-custom-username').value.trim();
     const password = document.getElementById('user-password').value;
     const role = document.getElementById('user-role').value;
@@ -1277,27 +1277,26 @@ async function saveUser(e) {
     }
 
     let finalEmail = email || (customUsername ? createGenericEmail(customUsername, appId) : '');
-    if (!finalEmail) {
-        showModal('Erro', 'Email ou Usuário obrigatório.', 'error');
-        return;
-    }
-
     const isEditing = !!id;
+
     try {
         const settingsDocRef = doc(db, "artifacts", appId, "public", "data", "settings", "config");
-        const snap = await getDoc(settingsDocRef);
         
+        // TRAVA DE SEGURANÇA: Lê o banco antes de qualquer alteração
+        const snap = await getDoc(settingsDocRef);
         if (!snap.exists()) {
-            showModal('Erro', 'Falha ao ler banco de dados. Operação cancelada para proteger dados.', 'error');
+            showModal('Erro Crítico', 'Não foi possível ler as configurações do banco. Operação cancelada para proteger os dados.', 'error');
             return;
         }
 
         if (!isEditing) {
+            // Cria login no Auth
             await createUserWithEmailAndPassword(auth, finalEmail, password || '123456');
             const newUser = { 
                 id: crypto.randomUUID(), name, username: finalEmail, customUsername, role, 
                 permissions: { dashboard: true, cadastro: true, pesquisa: true, settings: role === 'admin' }
             };
+            // arrayUnion: Adiciona sem apagar ninguém
             await updateDoc(settingsDocRef, { users: arrayUnion(newUser) });
         } else {
             const currentUsers = snap.data().users || [];
@@ -1312,7 +1311,7 @@ async function saveUser(e) {
         resetUserForm();
     } catch (err) {
         console.error(err);
-        showModal('Erro', 'Erro ao salvar: ' + err.message, 'error');
+        showModal('Erro ao Salvar', err.message, 'error');
     }
 }
 
@@ -1326,7 +1325,7 @@ async function deleteUser(id) {
         showModal('Sucesso', 'Usuário removido.', 'success');
         renderApp();
     } catch (e) {
-        showModal('Erro', 'Falha ao excluir.', 'error');
+        showModal('Erro', 'Falha ao excluir usuário.', 'error');
     }
 }
 
@@ -1335,17 +1334,38 @@ async function handleSolicitarAcesso(e) {
     const form = e.target;
     const nome = form['solicitar-name'].value.trim();
     const email = form['solicitar-email'].value.trim();
-    const phone = form['solicitar-phone'].value.trim();
-    const pass = form['solicitar-temp-password'].value.trim();
+    const telefone = form['solicitar-phone'].value.trim();
+    const senha = form['solicitar-temp-password'].value.trim();
 
     try {
         const pendingColRef = collection(db, `artifacts/${appId}/public/data/pending_approvals`);
-        await addDoc(pendingColRef, { name: nome, email, phone, tempPassword: pass, createdAt: new Date().toISOString() });
-        showModal('Enviado', 'Solicitação enviada para o administrador.', 'success');
+        await addDoc(pendingColRef, { 
+            name: nome, email, phone: telefone, tempPassword: senha, createdAt: new Date().toISOString() 
+        });
+        showModal('Solicitação Enviada', 'Aguarde a aprovação do administrador.', 'success');
         form.reset();
         updateState('loginView', 'login');
     } catch (error) {
         showModal('Erro', 'Falha ao enviar solicitação.', 'error');
+    }
+}
+
+async function approveUser(pendingId, name, email, tempPassword) {
+    try {
+        await createUserWithEmailAndPassword(auth, email, tempPassword);
+        const settingsDocRef = doc(db, "artifacts", appId, "public", "data", "settings", "config");
+        const newUser = { 
+            id: crypto.randomUUID(), name, username: email, role: 'user', 
+            permissions: { dashboard: true, cadastro: true, pesquisa: true, settings: false }
+        };
+        const batch = writeBatch(db);
+        batch.update(settingsDocRef, { users: arrayUnion(newUser) });
+        batch.delete(doc(db, `artifacts/${appId}/public/data/pending_approvals`, pendingId));
+        await batch.commit();
+        showModal('Sucesso', 'Usuário aprovado!', 'success');
+        renderApp();
+    } catch (e) {
+        showModal('Erro', 'Falha na aprovação.', 'error');
     }
 }
 
@@ -5198,6 +5218,7 @@ window.hideVincularModal = hideVincularModal;
 // 🛑 handleDesvincularBordoIndividual NÃO É MAIS NECESSÁRIO como função separada no HTML
 // --- Inicialização do Sistema ---
 window.onload = initApp;
+
 
 
 

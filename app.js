@@ -1191,6 +1191,10 @@ async function deleteDuplicity(collectionName, id) {
 // --- BLOCO INTEGRADO E FINAL: GESTÃO DE USUÁRIOS E SOLICITAÇÕES ---
 // =============================================================================
 
+// =============================================================================
+// --- BLOCO INTEGRADO: USUÁRIOS, SOLICITAÇÕES E APROVAÇÕES (RESTAURADO) ---
+// =============================================================================
+
 function loadUserForEdit(id) {
     const user = settings.users.find(u => u.id === id);
     if (user) {
@@ -1222,11 +1226,6 @@ async function saveUser(e) {
     }
 
     let finalEmail = email || (customUsername ? createGenericEmail(customUsername, appId) : '');
-    if (!finalEmail) {
-        showModal('Erro', 'Informe um Email ou Nome de Usuário.', 'error');
-        return;
-    }
-
     const isEditing = !!id;
 
     try {
@@ -1234,7 +1233,7 @@ async function saveUser(e) {
         const snap = await getDoc(settingsDocRef);
         
         if (!snap.exists()) {
-            showModal('Erro Crítico', 'Banco de dados inacessível. Operação cancelada.', 'error');
+            showModal('Erro Crítico', 'Falha ao ler banco. Operação cancelada.', 'error');
             return;
         }
 
@@ -1253,28 +1252,105 @@ async function saveUser(e) {
                 await updateDoc(settingsDocRef, { users: currentUsers });
             }
         }
-        showModal('Sucesso', 'Perfil salvo!', 'success');
+        showModal('Sucesso', 'Perfil salvo com sucesso!', 'success');
         renderApp();
         resetUserForm();
     } catch (err) {
-        console.error(err);
-        showModal('Erro ao Salvar', err.message, 'error');
+        showModal('Erro', 'Erro ao salvar: ' + err.message, 'error');
     }
 }
 
 async function deleteUser(id) {
     const userToDelete = settings.users.find(u => u.id === id);
     if (!userToDelete || userToDelete.username === ADMIN_PRINCIPAL_EMAIL) return;
-    
     try {
         const settingsDocRef = doc(db, "artifacts", appId, "public", "data", "settings", "config");
         await updateDoc(settingsDocRef, { users: arrayRemove(userToDelete) });
         showModal('Sucesso', 'Usuário removido.', 'success');
         renderApp();
     } catch (e) {
-        showModal('Erro', 'Falha ao excluir usuário.', 'error');
+        showModal('Erro', 'Falha ao excluir.', 'error');
     }
 }
+
+function renderPendingApprovalsModal() {
+    if (!currentUser || currentUser.role !== 'admin') return;
+    
+    const pendingListHTML = pendingUsers.length > 0 ? 
+        pendingUsers.map(u => `
+            <div class="flex items-center justify-between p-3 border-b dark:border-gray-700 bg-white dark:bg-gray-700 rounded-lg mb-2 shadow-sm">
+                <div>
+                    <p class="font-semibold dark:text-white">${u.name}</p>
+                    <p class="text-xs text-gray-500">${u.email}</p>
+                </div>
+                <div class="flex space-x-2">
+                    <button onclick="approveUserWrapper('${u.id}', '${u.name}', '${u.email}', '${u.tempPassword}')" class="px-3 py-1 text-xs bg-green-main text-white rounded-lg">Aprovar</button>
+                    <button onclick="rejectUserWrapper('${u.id}', '${u.name}')" class="px-3 py-1 text-xs bg-red-50 text-white rounded-lg">Negar</button>
+                </div>
+            </div>
+        `).join('') : '<p class="text-center py-4 text-gray-500">Nenhuma solicitação pendente.</p>';
+
+    const modal = document.getElementById('global-modal');
+    document.getElementById('modal-title').textContent = `Aprovações Pendentes (${pendingUsers.length})`;
+    document.getElementById('modal-message').innerHTML = `<div class="max-h-80 overflow-y-auto">${pendingListHTML}</div>`;
+    document.getElementById('modal-actions').innerHTML = `<button onclick="hideModal()" class="px-4 py-2 bg-gray-200 dark:bg-gray-700 rounded-lg">Fechar</button>`;
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+}
+
+async function approveUser(pendingId, name, email, tempPassword) {
+    try {
+        await createUserWithEmailAndPassword(auth, email, tempPassword);
+        const settingsDocRef = doc(db, "artifacts", appId, "public", "data", "settings", "config");
+        const newUser = { 
+            id: crypto.randomUUID(), name, username: email, role: 'user', 
+            permissions: { dashboard: true, cadastro: true, pesquisa: true, settings: false } 
+        };
+        const batch = writeBatch(db);
+        batch.update(settingsDocRef, { users: arrayUnion(newUser) });
+        batch.delete(doc(db, `artifacts/${appId}/public/data/pending_approvals`, pendingId));
+        await batch.commit();
+        showModal('Sucesso', 'Usuário aprovado!', 'success');
+        renderApp();
+    } catch (e) {
+        showModal('Erro', 'Falha na aprovação: ' + e.message, 'error');
+    }
+}
+
+async function rejectUser(id, name) {
+    try {
+        await deleteDoc(doc(db, `artifacts/${appId}/public/data/pending_approvals`, id));
+        renderApp();
+    } catch (e) { console.error(e); }
+}
+
+async function handleSolicitarAcesso(e) {
+    e.preventDefault();
+    const form = e.target;
+    const nome = form['solicitar-name'].value.trim();
+    const email = form['solicitar-email'].value.trim();
+    const phone = form['solicitar-phone'].value.trim();
+    const pass = form['solicitar-temp-password'].value.trim();
+
+    try {
+        const pendingColRef = collection(db, `artifacts/${appId}/public/data/pending_approvals`);
+        await addDoc(pendingColRef, { 
+            name: nome, email, phone, tempPassword: pass, createdAt: new Date().toISOString() 
+        });
+        showModal('Solicitação Enviada', 'Sua solicitação foi enviada com sucesso!', 'success');
+        form.reset();
+        updateState('loginView', 'login');
+    } catch (error) {
+        showModal('Erro', 'Falha ao enviar solicitação.', 'error');
+    }
+}
+
+function resetUserForm() {
+    const f = document.getElementById('form-user');
+    if (f) { f.reset(); document.getElementById('user-id').value = ''; }
+}
+
+// =============================================================================
 
 // Wrappers para lidar com aspas em strings
 window.approveUserWrapper = (id, name, email, tempPassword) => {
@@ -5026,6 +5102,7 @@ window.hideVincularModal = hideVincularModal;
 // 🛑 handleDesvincularBordoIndividual NÃO É MAIS NECESSÁRIO como função separada no HTML
 // --- Inicialização do Sistema ---
 window.onload = initApp;
+
 
 
 

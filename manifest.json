@@ -1,10 +1,12 @@
 {
-  "name": "Gestão de Rádios e Bordos",
-  "short_name": "GestãoRádios",
+  "name": "Link-Frota | Gestão de Frotas Agrícolas",
+  "short_name": "Link-Frota",
   "start_url": "./index.html#dashboard",
+  "scope": "./",
   "display": "standalone",
+  "orientation": "portrait",
   "background_color": "#ffffff",
-  "theme_color": "#008000",
+  "theme_color": "#40800c",
   "icons": [
     {
       "src": "AppImages/icon-192.png",

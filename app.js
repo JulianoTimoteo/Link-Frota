@@ -6,12 +6,10 @@ import {
     onAuthStateChanged, 
     signOut,
     updatePassword,
-    // NOVO IMPORT: Necessário para criar usuários se o Admin cadastrar com senha/username
     createUserWithEmailAndPassword,
     reauthenticateWithCredential,
     EmailAuthProvider
 } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-// app.js (Linha 28 aprox.)
 import { 
     getFirestore, 
     doc, 
@@ -25,10 +23,8 @@ import {
     query, 
     writeBatch,
     setLogLevel,
-    // NOVOS IMPORTS
     getDocs, 
     where,
-    // --- ADICIONE ESTAS DUAS LINHAS ---
     arrayUnion,
     arrayRemove
 } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
@@ -74,7 +70,7 @@ let radioSearch = '', equipamentoSearch = '', bordosSearch = '', geralSearch = '
 let focusedSearchInputId = null;
 let searchCursorPosition = 0;
 let searchTermPesquisa = ''; // 🌟 NOVO: Termo de busca da aba Pesquisa
-// 🌟 REMOVIDO: pendingEquipamentoId e vinculoTipo não são mais necessários com o modal.
+let pesquisaReport = null; // 🌟 NOVO: Registro selecionado para mini relatório
 
 // Constantes de Configuração
 const GROUPS = ['Colheita', 'Transporte', 'Oficina', 'TPL', 'Industria'];
@@ -108,6 +104,73 @@ let settings = {
 
 // --- PWA: Variável para prompt de instalação ---
 let deferredPrompt;
+
+// 🌟 NOVO: Cache offline para dados da Pesquisa
+const CACHE_KEY = 'linkfrota_cache';
+const CACHE_TIME_KEY = 'linkfrota_cache_time';
+const CACHE_DURATION = 2 * 60 * 60 * 1000; // 2 horas
+
+function saveDataCache() {
+    const data = {
+        registros: dbRegistros,
+        radios: dbRadios,
+        equipamentos: dbEquipamentos,
+        bordos: dbBordos
+    };
+    try {
+        localStorage.setItem(CACHE_KEY, JSON.stringify(data));
+        localStorage.setItem(CACHE_TIME_KEY, Date.now().toString());
+    } catch (e) {
+        console.warn('Erro ao salvar cache:', e);
+    }
+}
+
+function loadDataCache() {
+    const timeStr = localStorage.getItem(CACHE_TIME_KEY);
+    if (!timeStr) return false;
+    const elapsed = Date.now() - parseInt(timeStr);
+    if (elapsed > CACHE_DURATION) {
+        localStorage.removeItem(CACHE_KEY);
+        localStorage.removeItem(CACHE_TIME_KEY);
+        return false;
+    }
+    try {
+        const cached = localStorage.getItem(CACHE_KEY);
+        if (!cached) return false;
+        const data = JSON.parse(cached);
+        dbRegistros = data.registros || [];
+        dbRadios = data.radios || [];
+        dbEquipamentos = data.equipamentos || [];
+        dbBordos = data.bordos || [];
+        return true;
+    } catch (e) {
+        return false;
+    }
+}
+
+async function saveDataCacheFile() {
+    const data = {
+        exportadoEm: new Date().toISOString(),
+        registros: dbRegistros,
+        equipamentos: dbEquipamentos,
+        radios: dbRadios,
+        bordos: dbBordos
+    };
+    const json = JSON.stringify(data, null, 2);
+
+    // OPFS (Origin Private File System): salva cadastro.json sem pedir permissão
+    // O arquivo fica no sandbox do navegador, disponível offline
+    try {
+        const root = await navigator.storage.getDirectory();
+        const fileHandle = await root.getFileHandle('cadastro.json', { create: true });
+        const writable = await fileHandle.createWritable();
+        await writable.write(json);
+        await writable.close();
+    } catch (e) {
+        // OPFS não disponível (Safari) — usa só localStorage, sem arquivo físico
+        console.warn('OPFS indisponível, salvando apenas em localStorage:', e);
+    }
+}
 
 // 🌟 NOVO: Variáveis para controle do Prompt PWA
 const PWA_PROMPT_KEY = 'pwa_prompt_dismissed';
@@ -244,6 +307,11 @@ function checkDuplicities() {
 function detachFirestoreListeners() {
     firestoreListeners.forEach(unsub => unsub());
     firestoreListeners = [];
+    firestoreListenersAttached = false;
+    if (firestoreRefreshInterval) {
+        clearInterval(firestoreRefreshInterval);
+        firestoreRefreshInterval = null;
+    }
 }
 
 /**
@@ -296,46 +364,27 @@ async function loadInitialSettings() {
 }
 
 
+let firestoreListenersAttached = false;
+let firestoreRefreshInterval = null;
+
 async function attachFirestoreListeners() {
-    detachFirestoreListeners();	
-    if (!db || !appId || !currentUser) return; // Só anexa se estiver autenticado
+    if (firestoreListenersAttached) return;
+    if (!db || !appId || !currentUser) return;
+    detachFirestoreListeners();
+    firestoreListenersAttached = true;
 
-    // 1. Sincronizar Coleções
-    const collectionsToSync = {
-        'radios': (data) => dbRadios = data,
-        'equipamentos': (data) => dbEquipamentos = data,
-        'bordos': (data) => dbBordos = data, 
-        'registros': (data) => dbRegistros = data,
-        // [NOVO] Agora sincroniza a tabela separada de usuários
-        'users': (data) => {
-             // Atualiza a lista global e ordena por nome
-             settings.users = data.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-             
-             // Atualiza a tela sempre que houver mudanças
-             checkDuplicities();
-             if(!isLoggingIn) renderApp();
-        }
-    };
+    // 1. Carregar cache localStorage imediatamente para UI instantânea
+    const cacheLoaded = loadDataCache();
+    if (cacheLoaded && !isLoggingIn) renderApp();
 
-    Object.keys(collectionsToSync).forEach(colName => {
-        const colPath = `artifacts/${appId}/public/data/${colName}`;
-        const q = query(collection(db, colPath));
-        
-        const unsub = onSnapshot(q, (querySnapshot) => {
-            const data = [];
-            querySnapshot.forEach((doc) => {
-                data.push({ id: doc.id, ...doc.data() });
-            });
-            
-            collectionsToSync[colName](data);	
-            
-        }, (error) => {
-            console.error(`Erro no listener de ${colName}:`, error);
-        });
-        firestoreListeners.push(unsub);
-    });
+    // 2. Buscar dados frescos do Firestore (getDocs, não onSnapshot)
+    await refreshDataFromFirestore();
 
-    // 2. Listener para Solicitações Pendentes (Acesso: Apenas Admin)
+    // 3. Refresh automático a cada 2 horas
+    if (firestoreRefreshInterval) clearInterval(firestoreRefreshInterval);
+    firestoreRefreshInterval = setInterval(refreshDataFromFirestore, CACHE_DURATION);
+
+    // 4. Listener para Solicitações Pendentes (Acesso: Apenas Admin) — mantém onSnapshot para tempo real
     if (currentUser.role === 'admin') {
         const pendingColPath = `artifacts/${appId}/public/data/pending_approvals`;
         const qPending = query(collection(db, pendingColPath));
@@ -346,28 +395,44 @@ async function attachFirestoreListeners() {
                 data.push({ id: doc.id, ...doc.data() });
             });
             pendingUsers = data;
-            if(!isLoggingIn) renderApp();
+            if (!isLoggingIn) renderApp();
         }, (error) => {
             console.error(`Erro no listener de pending_approvals:`, error);
         });
         firestoreListeners.push(unsubPending);
     }
 }
-    // 3. Força renderização
-    handleHashChange();
-async function saveSettings() {
+
+async function refreshDataFromFirestore() {
     if (!db || !appId) return;
-    // [CORREÇÃO] Usa appId hardcoded
-    const settingsDocRef = doc(db, "artifacts", appId, "public", "data", "settings", "config");
+
+    const collectionsToFetch = {
+        'radios': (data) => dbRadios = data,
+        'equipamentos': (data) => dbEquipamentos = data,
+        'bordos': (data) => dbBordos = data,
+        'registros': (data) => dbRegistros = data
+    };
+
     try {
-        // A escrita aqui exige permissão de isAdmin() (Regra 1)
-        await setDoc(settingsDocRef, {	
-            letterMap: settings.letterMap,
-            nextIndex: settings.nextIndex,
-            users: settings.users // Salva a lista de usuários
-        }, { merge: true });
-    } catch (e) {
-        showModal('Erro', 'Não foi possível salvar as configurações no banco de dados. Verifique a permissão do Administrador Principal.', 'error');
+        const fetchPromises = Object.keys(collectionsToFetch).map(async (colName) => {
+            const colPath = `artifacts/${appId}/public/data/${colName}`;
+            const q = query(collection(db, colPath));
+            const querySnapshot = await getDocs(q);
+            const data = [];
+            querySnapshot.forEach((doc) => {
+                data.push({ id: doc.id, ...doc.data() });
+            });
+            collectionsToFetch[colName](data);
+        });
+
+        await Promise.all(fetchPromises);
+
+        saveDataCache();
+        await saveDataCacheFile();
+
+        if (!isLoggingIn) renderApp();
+    } catch (error) {
+        console.error('Erro ao atualizar dados do Firestore:', error);
     }
 }
 
@@ -444,6 +509,184 @@ function setPesquisaPage(delta) {
     renderApp();
 }
 
+function abrirRelatorio(recordId) {
+    const record = dbRegistros.find(r => r.id === recordId);
+    if (!record) return;
+    const e = dbEquipamentos.find(item => item.id === record.equipamentoId) || {};
+    const r = dbRadios.find(item => item.id === record.radioId) || {};
+    const t = dbBordos.find(item => item.id === record.telaId && item.tipo === 'Tela') || {};
+    const m = dbBordos.find(item => item.id === record.magId && item.tipo === 'Mag') || {};
+    const c = dbBordos.find(item => item.id === record.chipId && item.tipo === 'Chip') || {};
+    pesquisaReport = { id: record.id, equipamento: e, radio: r, tela: t, mag: m, chip: c };
+    renderApp();
+}
+
+function fecharRelatorio() {
+    pesquisaReport = null;
+    renderApp();
+}
+
+async function exportarCadastroJSON() {
+    const data = {
+        exportadoEm: new Date().toISOString(),
+        registros: dbRegistros,
+        equipamentos: dbEquipamentos,
+        radios: dbRadios,
+        bordos: dbBordos
+    };
+    const json = JSON.stringify(data, null, 2);
+
+    // Tenta salvar via OPFS primeiro (silencioso)
+    try {
+        const root = await navigator.storage.getDirectory();
+        const fileHandle = await root.getFileHandle('cadastro.json', { create: true });
+        const writable = await fileHandle.createWritable();
+        await writable.write(json);
+        await writable.close();
+        showModal('Exportado', 'cadastro.json atualizado no armazenamento local do app.', 'success');
+        return;
+    } catch (e) {
+        console.warn('OPFS indisponível, usando download:', e);
+    }
+
+    // Fallback: download tradicional
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `cadastro_${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+function showRadioAmadorModal() {
+    const modal = document.createElement('div');
+    modal.id = 'radio-amador-modal';
+    modal.innerHTML = `
+        <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm" onclick="if(event.target===this)fecharRadioAmadorModal()">
+            <div class="w-full max-w-md bg-gradient-to-b from-[#1a1a2e] to-[#0f0f1a] rounded-2xl p-6 shadow-2xl border border-green-900/40" style="box-shadow: 0 0 40px rgba(0,255,65,0.05), inset 0 0 40px rgba(0,255,65,0.03);" onclick="event.stopPropagation()">
+                <div class="text-center mb-4">
+                    <div class="text-green-500/40 text-xs tracking-[0.3em] uppercase mb-1">Link-Frota</div>
+                    <div class="text-green-400/60 text-[10px] tracking-[0.5em] uppercase">Radio Amador</div>
+                </div>
+                <div class="bg-[#050508] rounded-lg p-4 mb-4 border border-green-900/30 font-mono" style="box-shadow: inset 0 0 20px rgba(0,0,0,0.8), 0 0 10px rgba(0,255,65,0.03);">
+                    <div class="flex items-center justify-between mb-3">
+                        <span class="text-green-500/50 text-[10px] tracking-wider">RX/TX</span>
+                        <span class="text-green-500/30 text-[10px]">
+                            <span class="inline-block w-2 h-2 rounded-full bg-green-500/40 animate-pulse mr-1"></span>
+                            ONLINE
+                        </span>
+                    </div>
+                    <div class="text-center mb-3">
+                        <div class="text-4xl tracking-[0.15em] text-green-400 font-mono font-bold drop-shadow-[0_0_10px_rgba(0,255,65,0.3)]" id="radio-modal-freq">---</div>
+                        <div class="text-[10px] text-green-600/50 tracking-[0.3em] mt-1">MHz</div>
+                    </div>
+                    <div class="border-t border-green-900/30 pt-3" id="radio-modal-dados">
+                        <div class="text-green-700/50 text-xs text-center py-4">AGUARDANDO CÓDIGO</div>
+                    </div>
+                    <div class="border-t border-green-900/30 pt-3 mt-3" id="radio-modal-sinal" style="display:none">
+                        <div class="text-[10px] text-green-600/50 mb-2">SINAL</div>
+                        <div class="flex items-center gap-1">
+                            ${[1,2,3,4,5].map(i => `<div class="h-3 flex-1 rounded-sm bg-green-500/60" style="box-shadow: 0 0 6px rgba(0,255,65,0.4)"></div>`).join('')}
+                        </div>
+                    </div>
+                </div>
+                <input type="text" id="radio-modal-input" placeholder="DIGITE O CÓDIGO" maxlength="10" class="w-full bg-[#050508] border border-green-900/40 rounded-lg px-4 py-3 mb-3 text-green-400 font-mono text-lg tracking-widest text-center placeholder-green-800/40 focus:outline-none focus:border-green-600/60 focus:ring-1 focus:ring-green-600/30 uppercase" autocomplete="off" />
+                <div class="grid grid-cols-3 gap-2">
+                    <button onclick="radioModalBuscar()" class="col-span-2 bg-green-900/30 hover:bg-green-800/40 text-green-400 border border-green-700/40 rounded-lg py-3 font-mono text-sm tracking-wider transition-all active:scale-95">
+                        <i class="fas fa-search mr-2"></i> PESQUISAR
+                    </button>
+                    <button onclick="fecharRadioAmadorModal()" class="bg-red-900/20 hover:bg-red-800/30 text-red-400 border border-red-700/30 rounded-lg py-3 font-mono text-sm tracking-wider transition-all active:scale-95">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+    setTimeout(() => {
+        const input = document.getElementById('radio-modal-input');
+        if (input) {
+            input.focus();
+            input.onkeydown = (e) => { if (e.key === 'Enter') radioModalBuscar(); };
+        }
+    }, 100);
+}
+
+function fecharRadioAmadorModal() {
+    const modal = document.getElementById('radio-amador-modal');
+    if (modal) modal.remove();
+}
+
+function radioModalBuscar() {
+    const input = document.getElementById('radio-modal-input');
+    const freq = document.getElementById('radio-modal-freq');
+    const dados = document.getElementById('radio-modal-dados');
+    const sinal = document.getElementById('radio-modal-sinal');
+    if (!input || !freq || !dados) return;
+
+    const code = input.value.trim().toUpperCase();
+    freq.textContent = code || '---';
+
+    if (!code) {
+        dados.innerHTML = '<div class="text-green-700/50 text-xs text-center py-4">AGUARDANDO CÓDIGO</div>';
+        sinal.style.display = 'none';
+        return;
+    }
+
+    let found = null;
+    for (const reg of dbRegistros) {
+        const e = dbEquipamentos.find(item => item.id === reg.equipamentoId) || {};
+        const r = dbRadios.find(item => item.id === reg.radioId) || {};
+        const t = dbBordos.find(item => item.id === reg.telaId && item.tipo === 'Tela') || {};
+        const m = dbBordos.find(item => item.id === reg.magId && item.tipo === 'Mag') || {};
+        const c = dbBordos.find(item => item.id === reg.chipId && item.tipo === 'Chip') || {};
+        const codigo = (e.codigo || '').toUpperCase();
+        const frota = (e.frota || '').toUpperCase();
+        const serieRadio = (r.serie || '').toUpperCase();
+        if (`${codigo} ${frota} ${serieRadio}`.includes(code)) {
+            const bs = [t.numeroSerie, m.numeroSerie, c.numeroSerie].filter(Boolean);
+            found = {
+                codigo: e.codigo || 'N/A',
+                frota: e.frota || 'N/A',
+                grupo: e.grupo || 'N/A',
+                gestor: e.gestor || 'Sem Gestor',
+                serieRadio: r.serie || 'N/A',
+                serieBordos: bs.length ? bs.join(' / ') : 'N/A',
+            };
+            break;
+        }
+    }
+
+    if (found) {
+        dados.innerHTML = `
+            <div class="space-y-1 text-xs leading-tight">
+                <div class="flex justify-between"><span class="text-green-400/70">COD:</span><span class="text-amber-300 font-mono font-bold">${found.codigo}</span></div>
+                <div class="flex justify-between"><span class="text-green-400/70">FROTA:</span><span class="text-white font-mono">${found.frota}</span></div>
+                <div class="flex justify-between"><span class="text-green-400/70">GRUPO:</span><span class="text-white font-mono">${found.grupo}</span></div>
+                <div class="flex justify-between"><span class="text-green-400/70">GESTOR:</span><span class="text-white font-mono">${found.gestor}</span></div>
+                <div class="flex justify-between border-t border-green-800/50 pt-1 mt-1"><span class="text-green-400/70">RADIO:</span><span class="text-cyan-300 font-mono">${found.serieRadio}</span></div>
+                <div class="flex justify-between"><span class="text-green-400/70">BORDOS:</span><span class="text-cyan-300 font-mono truncate max-w-[180px]">${found.serieBordos}</span></div>
+            </div>
+        `;
+        sinal.style.display = 'block';
+    } else {
+        dados.innerHTML = `
+            <div class="space-y-1 text-xs leading-tight">
+                <div class="flex justify-between"><span class="text-green-400/70">COD:</span><span class="text-red-400 font-mono font-bold">---</span></div>
+                <div class="flex justify-between"><span class="text-green-400/70">FROTA:</span><span class="text-red-400/70 font-mono">NÃO ENCONTRADO</span></div>
+                <div class="flex justify-between"><span class="text-green-400/70">GRUPO:</span><span class="text-gray-600 font-mono">---</span></div>
+                <div class="flex justify-between"><span class="text-green-400/70">GESTOR:</span><span class="text-gray-600 font-mono">---</span></div>
+                <div class="flex justify-between border-t border-green-800/50 pt-1 mt-1"><span class="text-green-400/70">RADIO:</span><span class="text-gray-600 font-mono">---</span></div>
+                <div class="flex justify-between"><span class="text-green-400/70">BORDOS:</span><span class="text-gray-600 font-mono">---</span></div>
+            </div>
+        `;
+        sinal.style.display = 'none';
+    }
+}
+
 // --- Funções de Geração de Código ---
 
 function zpad(n, size) {	
@@ -505,7 +748,7 @@ async function validateVinculoBeforeSave(data) {
 
 /**
  * @STEP 1: Refresh automático após salvar/atualizar
- * Substitui a função original para incluir attachFirestoreListeners() e renderApp()
+ * Dispara refreshDataFromFirestore() para buscar dados atualizados do Firestore
  */
 async function saveRecord(collectionName, record) {
     if (!db || !appId) {
@@ -551,10 +794,7 @@ async function saveRecord(collectionName, record) {
             showModal('Sucesso', `${collectionName} adicionado com sucesso!`, 'success');
         }
         
-        // @STEP 1: Força o refresh de dados e da tela após salvar/atualizar
-        // O onSnapshot já fará o renderApp() - mantemos o attach para garantir o refresh de ouvintes
-        await attachFirestoreListeners();
-        // Não é mais necessário renderApp() aqui, o listener fará isso.
+        await refreshDataFromFirestore();
     } catch (error) {
         console.error(`Erro ao salvar registro de ${collectionName}:`, error);
         showModal('Erro', 'Não foi possível salvar o registro no banco de dados.', 'error');
@@ -651,9 +891,8 @@ async function deleteLink(regId, type) {
 
         await batch.commit();
         showModal('Sucesso', successMessage, 'success');
-        
-        // 🌟 NOVO: Força o refresh da tela geral após a desvinculação
-        renderApp();
+
+        await refreshDataFromFirestore();
 
     } catch (error) {
         console.error("Erro ao desvincular registro:", error);
@@ -1110,6 +1349,7 @@ async function handleVincularSubmit(equipamentoId, tipo, existingReg) {
     await batch.commit();
     const msg = isEditingMode ? `Vínculos da Frota ${equipamento.frota} atualizados com sucesso!` : `Novo Vínculo criado. Código: ${codigoDoEquipamento}`;
     showModal('Sucesso!', msg, 'success');
+    await refreshDataFromFirestore();
   } catch (error) {
     console.error("Erro ao salvar associação:", error);
     showModal('Erro', 'Ocorreu um erro ao salvar a associação.', 'error');
@@ -1192,7 +1432,7 @@ async function toggleRecordAtivo(collectionName, id) {
         // Atualiza o status
         await updateDoc(docRef, { ativo: newAtivoState });	
         showModal('Sucesso', `Registro ${newAtivoState ? 'ATIVADO' : 'INATIVADO'} com sucesso!`, 'success');
-        // renderApp() é chamado automaticamente pelo onSnapshot
+        await refreshDataFromFirestore();
         
     } catch (error) {
         console.error("Erro ao alternar status do registro:", error);
@@ -1231,7 +1471,7 @@ async function deleteDuplicity(collectionName, id) {
 
         showModal('Sucesso', 'Duplicidade removida com sucesso! A integridade dos dados será verificada novamente.', 'success');
         
-        // Força nova verificação e renderização
+        await refreshDataFromFirestore();
         checkDuplicities(); 
         renderApp();
         hideDuplicityModal();
@@ -1863,12 +2103,10 @@ function renderInstallButton() {
 
 function renderTopBar() {
     const allTabs = [
-        // Corrigido para manter os nomes originais e IDs. A cor virá do CSS nth-child.
-        { id: 'dashboard', name: 'Dashboard', icon: 'fa-chart-line' }, // 1º child -> Azul
-        { id: 'cadastro', name: 'Cadastro', icon: 'fa-box' }, // 2º child -> Roxa
-        { id: 'pesquisa', name: 'Pesquisa', icon: 'fa-search' }, // 3º child -> Verde Água
-        // Removido 'my-profile' daqui. 'settings' agora é o 4º
-        { id: 'settings', name: 'Configurações', icon: 'fa-cog', adminOnly: true } // 4º child -> Laranja
+        { id: 'dashboard', name: 'Dashboard', icon: 'fa-chart-line' },
+        { id: 'cadastro', name: 'Cadastro', icon: 'fa-box' },
+        { id: 'pesquisa', name: 'Pesquisa', icon: 'fa-search' },
+        { id: 'settings', name: 'Configurações', icon: 'fa-cog', adminOnly: true },
     ];
     
     // Filtra as abas para o usuário atual
@@ -1916,59 +2154,67 @@ function renderTopBar() {
 
 
     return `
-        <header class="bg-white dark:bg-gray-800 shadow-lg sticky top-0 z-10 border-b border-gray-100 dark:border-gray-700">
-            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div class="flex justify-between h-16 items-center">
+        <header class="bg-white dark:bg-gray-800 shadow-md sticky top-0 z-10 border-b border-gray-200 dark:border-gray-700">
+            <div class="max-w-7xl mx-auto px-3 sm:px-4 lg:px-6">
+                <div class="flex justify-between items-center h-14 gap-3">
                     
-                    <div class="flex-1 flex justify-start items-center">
-                        <h1 class="text-xl font-bold text-gray-800 dark:text-gray-100 hidden sm:block">📻 Link-Frota</h1>
-                        <h1 class="text-xl font-bold text-gray-800 dark:text-gray-100 block sm:hidden">📻 LF</h1>
+                    <div class="flex items-center gap-3 min-w-0">
+                        <img src="https://usinapitangueiras.com.br/wp-content/uploads/2020/04/usina-pitangueiras-logo.png" alt="Usina Pitangueiras"	
+                            class="h-9 w-auto max-w-[110px] object-contain select-none"
+                            onerror="this.onerror=null; this.src='https://placehold.co/180x40/40800c/FFFFFF?text=Link-Frota'; this.alt='Link-Frota'">
+                        <div class="hidden sm:block h-6 w-px bg-gray-200 dark:bg-gray-700"></div>
+                        <div class="hidden sm:block min-w-0">
+                            <p class="text-[11px] font-semibold text-gray-900 dark:text-white leading-tight">Link-Frota</p>
+                            <p class="text-[10px] text-gray-500 dark:text-gray-400 leading-tight">Gestão de Frotas Agrícolas</p>
+                        </div>
                     </div>
 
-                    <nav class="hidden md:block mx-auto flex-none">
-                        <div class="radio-group-container border-b border-gray-200 dark:border-gray-700">
+                    <nav class="hidden md:flex flex-1 justify-center">
+                        <div class="radio-group-container border-b border-gray-100 dark:border-gray-700">
                             ${tabLinks}
                         </div>
                     </nav>
                     
-                    <div class="flex-1 flex justify-end items-center space-x-4">
+                    <div class="flex items-center gap-1 sm:gap-2">
                         
                         ${renderInstallButton()} ${renderThemeButton()} ${duplicityBell}
                         
                         ${currentUser.role === 'admin' ? `
-                        <button onclick="renderPendingApprovalsModal()" class="relative text-gray-500 dark:text-gray-300 hover:text-yellow-600 transition-colors p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700" title="Novas Solicitações de Acesso">
-                            <i class="fas fa-bell"></i>
+                        <button onclick="renderPendingApprovalsModal()" class="relative text-gray-500 dark:text-gray-300 hover:text-yellow-600 transition-colors p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700" title="Novas Solicitações de Acesso" aria-label="Solicitações de acesso pendentes">
+                            <i class="fas fa-inbox"></i>
                             ${pendingUsers.length > 0 ? `
-                            <span class="absolute top-0 right-0 inline-flex items-center justify-center px-2 py-1 text-xs font-bold leading-none text-red-100 transform translate-x-1/2 -translate-y-1/2 bg-red-600 rounded-full">${pendingUsers.length}</span>
+                            <span class="absolute -top-0.5 -right-0.5 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 text-[10px] font-bold leading-none text-white bg-red-600 rounded-full">${pendingUsers.length}</span>
                             ` : ''}
                         </button>
                         ` : ''}
 
-                        <span class="text-sm font-medium text-gray-600 dark:text-gray-300 hidden sm:inline">
-                            Olá, ${currentUser.name}
-                        </span>
-                        <button onclick="showProfileModal()" class="text-gray-500 dark:text-gray-300 hover:text-green-main transition-colors p-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700" title="Meu Perfil / Gerenciar Senha">
-                            ${getUserAvatar(currentUser)}
+                        <button onclick="showProfileModal()" class="flex items-center gap-2 pl-2 pr-1 py-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors" title="Perfil" aria-label="Abrir perfil">
+                            <div class="text-right hidden sm:block leading-tight">
+                                <p class="text-sm font-medium text-gray-900 dark:text-white max-w-[160px] truncate">${(currentUser.name || '').split(' ').slice(0, 2).join(' ')}</p>
+                                <p class="text-[10px] text-gray-500 dark:text-gray-400 uppercase tracking-wide">${currentUser.role === 'admin' ? 'Administrador' : 'Usuário'}</p>
+                            </div>
+                            <span class="h-8 w-8 inline-flex items-center justify-center rounded-full bg-[#40800c] text-white text-xs font-bold ring-2 ring-gray-200 dark:ring-gray-700">
+                                ${(currentUser.name || '??').split(' ').slice(0, 2).map(n => n[0]).join('').toUpperCase()}
+                            </span>
                         </button>
-                        <button onclick="handleLogout()" class="text-gray-500 dark:text-gray-300 hover:text-red-500 transition-colors p-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700" title="Sair do Sistema">
-                            <i class="fas fa-sign-out-alt"></i>
+                        <button onclick="handleLogout()" class="text-gray-500 dark:text-gray-300 hover:text-red-600 transition-colors p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700" title="Sair" aria-label="Sair do sistema">
+                            <i class="fas fa-right-from-bracket"></i>
                         </button>
                     </div>
                 </div>
             </div>
         </header>
-        <nav class="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 fixed bottom-0 left-0 right-0 z-10 md:hidden shadow-2xl">
+        <nav class="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 fixed bottom-0 left-0 right-0 z-10 md:hidden shadow-[0_-2px_10px_rgba(0,0,0,0.05)]">
                     <div class="flex justify-around">
                         ${tabs.map(tab => {
                             const isActive = currentPage === tab.id;
-                            const activeClass = isActive ? 'text-green-main tab-active font-semibold' : 'text-gray-500 dark:text-gray-300 hover:text-green-main';
-                            // Usando o nome original no mobile
-                            const mobileName = tab.name; 
+                            const activeClass = isActive ? 'text-[#40800c] tab-active font-semibold' : 'text-gray-500 dark:text-gray-300 hover:text-gray-700 dark:hover:text-gray-200';
+                            const mobileName = tab.name;							
 
                             return `
-                                <a href="#${tab.id}" class="py-3 px-4 flex flex-col items-center space-y-1 ${activeClass} transition-colors border-b-2 border-transparent">
-                                    <i class="fas ${tab.icon}"></i>
-                                    <span class="text-xs">${mobileName}</span>
+                                <a href="#${tab.id}" class="py-2.5 px-3 flex flex-col items-center justify-center space-y-1 ${activeClass} transition-colors border-b-2 border-transparent">
+                                    <i class="fas ${tab.icon} text-lg"></i>
+                                    <span class="text-[11px] font-medium leading-none">${mobileName}</span>
                                 </a>
                             `;
                         }).join('')}
@@ -2039,7 +2285,7 @@ function renderLogin() {
     }
 
     return `
-        <div class="flex items-center justify-center min-h-screen bg-gray-900 dark:bg-gray-900">
+        <div class="flex items-center justify-center min-h-screen bg-[#40800c]">
             <div class="w-full max-w-md p-8 space-y-8 bg-white/95 dark:bg-gray-800/95 backdrop-blur-sm rounded-xl shadow-2xl border border-green-main/30 dark:border-green-main/50">
                 ${content}
                 <p class="text-xs text-center text-gray-500 dark:text-gray-400">
@@ -2077,9 +2323,14 @@ function renderSolicitarAcesso() {
                 >
             </div>
             <div>
-                <input type="password" name="solicitar-temp-password" placeholder="Senha Provisória (Mín. 6 caracteres)" required minlength="6"	
-                    class="appearance-none relative block w-full px-4 py-3 border border-gray-300 dark:border-gray-600 placeholder-gray-500 text-gray-900 dark:text-gray-100 dark:bg-gray-700 rounded-lg focus:outline-none focus:ring-green-main focus:border-green-main sm:text-sm shadow-sm"
-                >
+                <div class="relative">
+                    <input type="password" id="temp-password" name="solicitar-temp-password" placeholder="Senha Provisória (Mín. 6 caracteres)" required minlength="6"	
+                        class="appearance-none relative block w-full px-4 py-3 border border-gray-300 dark:border-gray-600 placeholder-gray-500 text-gray-900 dark:text-gray-100 dark:bg-gray-700 rounded-lg focus:outline-none focus:ring-green-main focus:border-green-main sm:text-sm shadow-sm pr-10"
+                    >
+                    <button type="button" id="toggle-temp-password" class="absolute inset-y-0 right-0 px-3 flex items-center text-gray-500 dark:text-gray-300 hover:text-gray-700 dark:hover:text-gray-100 focus:outline-none" title="Mostrar/Ocultar Senha">
+                        <i id="toggle-temp-password-icon" class="fas fa-eye"></i>
+                    </button>
+                </div>
                 <p class="mt-1 text-xs text-gray-500 dark:text-gray-400 text-left">A senha provisória será usada para configurar seu acesso inicial.</p>
             </div>
             
@@ -2100,15 +2351,15 @@ function renderSolicitarAcesso() {
 
 function renderLoadingScreen() {
     return `
-        <div class="flex flex-col items-center justify-center min-h-screen bg-gray-900 dark:bg-gray-900">
+        <div class="flex flex-col items-center justify-center min-h-screen bg-[#40800c]">
             <img src="https://usinapitangueiras.com.br/wp-content/uploads/2020/04/usina-pitangueiras-logo.png" alt="Logo Usina Pitangueiras"	
-                class="h-40 w-auto mb-10 loader-logo-full"	
+                class="h-80 w-auto mb-10 loader-logo-full object-contain image-rendering:auto"	
                 onerror="this.onerror=null; this.src='https://placehold.co/200x100/40800c/FFFFFF?text=Logo'; this.alt='Logo Placeholder'">
                 
-            <h1 class="text-3xl font-extrabold text-green-main tracking-widest loading-text-animate">
+            <h1 class="text-3xl font-extrabold text-gray-900 tracking-widest loading-text-animate">
                 SISTEMA RÁDIOS
             </h1>
-            <p class="mt-4 text-sm text-gray-300 dark:text-gray-300 italic loading-text-animate">Aguarde o carregamento...</p>
+            <p class="mt-4 text-sm text-gray-900 dark:text-gray-900 italic loading-text-animate">Aguarde o carregamento...</p>
         </div>
     `;
 }
@@ -2435,7 +2686,97 @@ function renderDashboard() {
                 </div>
                 
             </div>
+
+            <!-- Gráficos de Barras -->
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6">
+                <div class="bg-white dark:bg-gray-800 rounded-xl shadow-xl p-6 border border-gray-200 dark:border-gray-700 futuristic-card">
+                    <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4 flex items-center">
+                        <i class="fas fa-broadcast-tower mr-2 text-blue-500"></i>
+                        Rádios
+                    </h3>
+                    <div class="space-y-3">
+                        ${[
+                            { label: 'Total', value: totalRadios, color: 'bg-blue-500', max: totalRadios || 1 },
+                            { label: 'Em Uso', value: radiosEmUso, color: 'bg-green-500', max: totalRadios || 1 },
+                            { label: 'Disponíveis', value: radiosDisponiveis, color: 'bg-sky-400', max: totalRadios || 1 },
+                            { label: 'Manutenção', value: radiosManutencao, color: 'bg-yellow-500', max: totalRadios || 1 },
+                            { label: 'Sinistro', value: radiosSinistro, color: 'bg-red-500', max: totalRadios || 1 }
+                        ].map(item => `
+                            <div>
+                                <div class="flex justify-between text-sm mb-1">
+                                    <span class="text-gray-700 dark:text-gray-300">${item.label}</span>
+                                    <span class="font-semibold text-gray-900 dark:text-gray-100">${item.value}</span>
+                                </div>
+                                <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-3 overflow-hidden">
+                                    <div class="${item.color} h-3 rounded-full transition-all duration-500" style="width: ${(item.value / item.max) * 100}%"></div>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+
+                <div class="bg-white dark:bg-gray-800 rounded-xl shadow-xl p-6 border border-gray-200 dark:border-gray-700 futuristic-card">
+                    <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4 flex items-center">
+                        <i class="fas fa-microchip mr-2 text-green-500"></i>
+                        Kits de Bordo
+                    </h3>
+                    <div class="space-y-3">
+                        ${[
+                            { label: 'Total Kits', value: totalBordos, color: 'bg-blue-500', max: totalBordos || 1 },
+                            { label: 'Kits em Uso', value: bordosEmUso, color: 'bg-green-500', max: totalBordos || 1 },
+                            { label: 'Kits Disponíveis', value: kitsDisponiveis, color: 'bg-sky-400', max: totalBordos || 1 }
+                        ].map(item => `
+                            <div>
+                                <div class="flex justify-between text-sm mb-1">
+                                    <span class="text-gray-700 dark:text-gray-300">${item.label}</span>
+                                    <span class="font-semibold text-gray-900 dark:text-gray-100">${item.value}</span>
+                                </div>
+                                <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-3 overflow-hidden">
+                                    <div class="${item.color} h-3 rounded-full transition-all duration-500" style="width: ${(item.value / item.max) * 100}%"></div>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+
+                <div class="bg-white dark:bg-gray-800 rounded-xl shadow-xl p-6 border border-gray-200 dark:border-gray-700 futuristic-card">
+                    <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4 flex items-center">
+                        <i class="fas fa-users mr-2 text-purple-500"></i>
+                        Equipes com Mais Instalações
+                    </h3>
+                    <div class="space-y-3">
+                        ${(() => {
+                            const gestorCount = {};
+                            dbRegistros.forEach(reg => {
+                                const eq = equipamentoMap[reg.equipamentoId];
+                                const gestor = eq?.gestor || 'Sem Gestor';
+                                gestorCount[gestor] = (gestorCount[gestor] || 0) + 1;
+                            });
+                            const topGestores = Object.entries(gestorCount)
+                                .sort((a, b) => b[1] - a[1])
+                                .slice(0, 10);
+                            const maxGestor = topGestores.length ? topGestores[0][1] : 1;
+                            return topGestores.length ? topGestores.map(([gestor, count]) => `
+                                <div>
+                                    <div class="flex justify-between text-sm mb-1">
+                                        <span class="text-gray-700 dark:text-gray-300 truncate">${gestor}</span>
+                                        <span class="font-semibold text-gray-900 dark:text-gray-100">${count}</span>
+                                    </div>
+                                    <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-3 overflow-hidden">
+                                        <div class="bg-purple-500 h-3 rounded-full transition-all duration-500" style="width: ${(count / maxGestor) * 100}%"></div>
+                                    </div>
+                                </div>
+                            `).join('') : '<p class="text-sm text-gray-500 dark:text-gray-400">Nenhuma instalação registrada.</p>';
+                        })()}
+                    </div>
+                </div>
+            </div>
+
         </div>
+
+        <button onclick="showRadioAmadorModal()" class="fixed bottom-6 right-6 z-40 w-14 h-14 rounded-full bg-gradient-to-br from-gray-900 to-gray-800 hover:from-green-800 hover:to-green-700 text-green-400 hover:text-white shadow-2xl flex items-center justify-center transition-all hover:scale-110 active:scale-95 border border-green-700/40" style="box-shadow: 0 4px 20px rgba(0,255,65,0.15);" title="Rádio Amador">
+            <i class="fas fa-broadcast-tower text-xl"></i>
+        </button>
     `;
 }
 
@@ -2776,8 +3117,11 @@ function renderCadastroEquipamento() {
                             class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-green-main focus:ring-green-main p-2 border dark:bg-gray-700 dark:text-gray-100">
                     </div>
                     <div class="flex space-x-3">
-                        <button type="submit" class="flex-1 w-full flex justify-center py-2 px-3 border border-transparent text-sm font-medium rounded-lg text-white bg-green-main hover:bg-green-700 shadow-md">
+                        <button type="submit" id="btn-equipamento-salvar" class="flex-1 w-full flex justify-center py-2 px-3 border border-transparent text-sm font-medium rounded-lg text-white bg-green-main hover:bg-green-700 shadow-md">
                             <i class="fas fa-save mr-2"></i> Salvar
+                        </button>
+                        <button type="button" id="btn-equipamento-excluir" onclick="deleteEquipamento()" class="w-1/3 flex justify-center py-2 px-3 border border-transparent text-sm font-medium rounded-lg text-white bg-red-600 hover:bg-red-700 shadow-md">
+                            <i class="fas fa-trash mr-2"></i> Excluir
                         </button>
                         <button type="button" onclick="document.getElementById('form-equipamento').reset(); document.getElementById('equipamento-id').value='';" class="w-1/4 flex justify-center py-2 px-3 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-lg text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 shadow-sm">
                             <i class="fas fa-redo"></i>
@@ -3400,79 +3744,162 @@ function renderCadastroGeral() {
 }
 
 function renderPesquisa() {
-    const radioMap = dbRadios.reduce((acc, r) => { acc[r.id] = r; return acc; }, {});
-    const equipamentoMap = dbEquipamentos.reduce((acc, e) => { acc[e.id] = e; return acc; }, {});
-    // 🌟 NOVO: Mapa de Bordos
-    const bordoMap = dbBordos.reduce((acc, b) => { acc[b.id] = b; return acc; }, {});
-    
-    // 1. Processa e filtra todos os registros ativos (junção de dados)
     const allRecords = dbRegistros.map(reg => {
-        const r = radioMap[reg.radioId] || {};
-        const e = equipamentoMap[reg.equipamentoId] || {};
-        const t = bordoMap[reg.telaId] || { tipo: 'Tela', numeroSerie: 'N/A' };
-        const m = bordoMap[reg.magId] || { tipo: 'Mag', numeroSerie: 'N/A' };
-        const c = bordoMap[reg.chipId] || { tipo: 'Chip', numeroSerie: 'N/A' };
-        
-        // 🌟 NOVO: Informações de Bordos para o registro
-        const bordos = [t, m, c];
-        const bordosText = bordos.map(b => b.numeroSerie).join(' / ');
-        const bordosDetailed = bordos.map(b => `${b.tipo}: ${b.numeroSerie}`).join(', ');
-        const temBordos = bordos.some(b => b.numeroSerie !== 'N/A');
-
+        const r = dbRadios.find(item => item.id === reg.radioId) || {};
+        const e = dbEquipamentos.find(item => item.id === reg.equipamentoId) || {};
+        const t = dbBordos.find(item => item.id === reg.telaId && item.tipo === 'Tela') || {};
+        const m = dbBordos.find(item => item.id === reg.magId && item.tipo === 'Mag') || {};
+        const c = dbBordos.find(item => item.id === reg.chipId && item.tipo === 'Chip') || {};
+        const serieRadio = r.serie || 'N/A';
+        const bs = [t.numeroSerie, m.numeroSerie, c.numeroSerie].filter(Boolean);
+        const serieBordos = bs.length ? bs.join(' / ') : 'N/A';
+        const term = `${e.codigo || ''} ${e.frota || ''} ${e.grupo || ''} ${serieRadio} ${serieBordos} ${e.gestor || ''}`.toLowerCase();
+        const statusRadio = r.status || 'N/A';
+        const statusBordos = [t.status, m.status, c.status].filter(Boolean).join(', ') || 'N/A';
         return {
-            id: reg.id,	
-            codigo: e.codigo || reg.codigo,
-            serie: r.serie || 'N/A',
-            modeloRadio: r.modelo || 'N/A', 
+            id: reg.id,
+            reg,
+            radio: r,
+            equipamento: e,
+            tela: t,
+            mag: m,
+            chip: c,
+            codigo: e.codigo || 'N/A',
             frota: e.frota || 'N/A',
-            modeloEquipamento: e.modelo || 'N/A',
-            grupo: e.grupo || 'N/A', 
-            subgrupo: e.subgrupo || 'N/A',
-            gestor: e.gestor || 'N/A', 
-            createdAt: reg.createdAt,
-            // 🌟 NOVO: Adicionando dados de bordos
-            bordosText, bordosDetailed, temBordos
+            grupo: e.grupo || 'N/A',
+            serieRadio,
+            serieBordos,
+            gestor: e.gestor || 'Sem Gestor',
+            term,
+            statusRadio,
+            statusBordos,
         };
     });
-    
-    let filteredRecords = allRecords;
-    const searchTerm = searchTermPesquisa.toLowerCase(); // Usa o termo global
 
+    let filteredRecords = allRecords;
+    const searchTerm = (searchTermPesquisa || '').trim().toLowerCase();
     if (searchTerm) {
-        filteredRecords = allRecords.filter(r =>	
-            (r.codigo || '').toLowerCase().includes(searchTerm) ||
-            (r.serie || '').toLowerCase().includes(searchTerm) ||
-            (r.modeloRadio || '').toLowerCase().includes(searchTerm) ||
-            (r.frota || '').toLowerCase().includes(searchTerm) ||
-            (r.grupo || '').toLowerCase().includes(searchTerm) ||
-            (r.subgrupo || '').toLowerCase().includes(searchTerm) ||
-            (r.gestor || '').toLowerCase().includes(searchTerm) ||
-            (r.modeloEquipamento || '').toLowerCase().includes(searchTerm) ||
-            // 🌟 NOVO: Busca por Série de Bordo
-            (r.bordosDetailed || '').toLowerCase().includes(searchTerm)
-        );
+        filteredRecords = allRecords.filter(r => r.term.includes(searchTerm));
     }
-    
-    // 2. Paginação
-    const totalPesquisaPages = Math.ceil(filteredRecords.length / PESQUISA_PAGE_SIZE);
+
+    // Se um relatório está aberto, encontra o registro atualizado
+    let reportRecord = null;
+    if (pesquisaReport) {
+        reportRecord = allRecords.find(r => r.id === pesquisaReport.id) || null;
+        if (!reportRecord) {
+            pesquisaReport = null;
+        }
+    }
+
+    // Abre relatório automaticamente se a busca encontrar exatamente 1 resultado
+    if (!reportRecord && filteredRecords.length === 1 && searchTerm) {
+        reportRecord = filteredRecords[0];
+        pesquisaReport = reportRecord;
+    }
+
+    const totalPesquisaPages = Math.max(1, Math.ceil(filteredRecords.length / PESQUISA_PAGE_SIZE));
     pesquisaPage = Math.min(pesquisaPage, totalPesquisaPages) || 1;
-    const paginatedRecords = filteredRecords.slice((pesquisaPage - 1) * PESQUISA_PAGE_SIZE, pesquisaPage * PESQUISA_PAGE_SIZE);
-    
+    const start = (pesquisaPage - 1) * PESQUISA_PAGE_SIZE;
+    const paginatedRecords = filteredRecords.slice(start, start + PESQUISA_PAGE_SIZE);
+
+    // --- Mini Relatório ---
+    let reportHtml = '';
+    if (reportRecord) {
+        const eq = reportRecord.equipamento;
+        const radio = reportRecord.radio;
+        const tela = reportRecord.tela;
+        const mag = reportRecord.mag;
+        const chip = reportRecord.chip;
+        const eqAtivo = eq.ativo !== false;
+
+        reportHtml = `
+            <div class="mb-6 bg-gradient-to-br from-green-50 to-emerald-50 dark:from-gray-800 dark:to-gray-750 rounded-xl shadow-lg p-6 border border-green-200 dark:border-green-800">
+                <div class="flex items-center justify-between mb-4">
+                    <h3 class="text-xl font-bold text-green-main dark:text-green-400 flex items-center gap-2">
+                        <i class="fas fa-file-alt"></i> Mini Relatório
+                    </h3>
+                    <button onclick="fecharRelatorio()" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700" title="Fechar relatório">
+                        <i class="fas fa-times fa-lg"></i>
+                    </button>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="bg-white dark:bg-gray-800 rounded-lg p-4 shadow-sm border border-gray-200 dark:border-gray-700">
+                        <h4 class="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3 flex items-center gap-2">
+                            <i class="fas fa-tractor"></i> Equipamento
+                        </h4>
+                        <div class="space-y-2 text-sm">
+                            <div class="flex justify-between"><span class="text-gray-500">Código</span><span class="font-semibold font-mono text-green-main dark:text-green-400">${eq.codigo || 'N/A'}</span></div>
+                            <div class="flex justify-between"><span class="text-gray-500">Frota</span><span class="font-semibold">${eq.frota || 'N/A'}</span></div>
+                            <div class="flex justify-between"><span class="text-gray-500">Grupo</span><span class="font-semibold">${eq.grupo || 'N/A'}</span></div>
+                            <div class="flex justify-between"><span class="text-gray-500">Modelo</span><span class="font-semibold">${eq.modelo || 'N/A'}</span></div>
+                            <div class="flex justify-between"><span class="text-gray-500">Subgrupo</span><span class="font-semibold">${eq.subgrupo || 'N/A'}</span></div>
+                            <div class="flex justify-between"><span class="text-gray-500">Gestor</span><span class="font-semibold">${eq.gestor || 'N/A'}</span></div>
+                            <div class="flex justify-between">
+                                <span class="text-gray-500">Status</span>
+                                <span class="font-semibold ${eqAtivo ? 'text-green-600' : 'text-red-500'}">${eqAtivo ? 'Ativo' : 'Inativo'}</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="bg-white dark:bg-gray-800 rounded-lg p-4 shadow-sm border border-gray-200 dark:border-gray-700">
+                        <h4 class="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3 flex items-center gap-2">
+                            <i class="fas fa-wifi"></i> Rádio
+                        </h4>
+                        <div class="space-y-2 text-sm">
+                            <div class="flex justify-between"><span class="text-gray-500">Série</span><span class="font-semibold font-mono">${radio.serie || 'N/A'}</span></div>
+                            <div class="flex justify-between"><span class="text-gray-500">Modelo</span><span class="font-semibold">${radio.modelo || 'N/A'}</span></div>
+                            <div class="flex justify-between">
+                                <span class="text-gray-500">Status</span>
+                                <span class="font-semibold ${(radio.status || '') === 'Disponível' ? 'text-green-600' : 'text-yellow-600'}">${radio.status || 'N/A'}</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="bg-white dark:bg-gray-800 rounded-lg p-4 shadow-sm border border-gray-200 dark:border-gray-700">
+                        <h4 class="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3 flex items-center gap-2">
+                            <i class="fas fa-microchip"></i> Bordos
+                        </h4>
+                        <div class="space-y-2 text-sm">
+                            ${[['Tela', tela], ['Mag', mag], ['Chip', chip]].map(([nome, b]) => `
+                                <div class="border-b border-gray-100 dark:border-gray-700 pb-2 last:border-0 last:pb-0">
+                                    <span class="text-xs font-semibold text-gray-400 uppercase">${nome}</span>
+                                    <div class="flex justify-between"><span class="text-gray-500">Série</span><span class="font-semibold font-mono">${b.numeroSerie || 'N/A'}</span></div>
+                                    <div class="flex justify-between"><span class="text-gray-500">Modelo</span><span class="font-semibold">${b.modelo || 'N/A'}</span></div>
+                                    <div class="flex justify-between"><span class="text-gray-500">Status</span><span class="font-semibold">${b.status || 'N/A'}</span></div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                    <div class="bg-white dark:bg-gray-800 rounded-lg p-4 shadow-sm border border-gray-200 dark:border-gray-700">
+                        <h4 class="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3 flex items-center gap-2">
+                            <i class="fas fa-info-circle"></i> Resumo
+                        </h4>
+                        <div class="space-y-2 text-sm">
+                            <div class="flex justify-between"><span class="text-gray-500">Vínculo</span><span class="font-semibold text-green-600">Ativo</span></div>
+                            <div class="flex justify-between"><span class="text-gray-500">Rádio</span><span class="font-semibold">${radio.serie ? 'Vinculado' : 'Sem vínculo'}</span></div>
+                            <div class="flex justify-between"><span class="text-gray-500">Bordos</span><span class="font-semibold">${tela.numeroSerie || mag.numeroSerie || chip.numeroSerie ? 'Vinculado' : 'Sem vínculo'}</span></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    // --- Tabela de Resultados ---
     let tableRows = '';
     if (paginatedRecords.length > 0) {
-        // CORREÇÃO: Colunas separadas para melhor legibilidade
         tableRows = paginatedRecords.map(r => `
-            <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/50 border-b dark:border-gray-700">
+            <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/50 border-b dark:border-gray-700 cursor-pointer" onclick="abrirRelatorio('${r.id}')">
                 <td class="px-3 py-2 text-sm font-semibold text-gray-900 dark:text-gray-100 font-mono">${r.codigo}</td>
                 <td class="px-3 py-2 text-sm text-gray-700 dark:text-gray-300">${r.frota}</td>
                 <td class="px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hidden sm:table-cell">${r.grupo}</td>
-                <td class="px-3 py-2 text-sm text-gray-700 dark:text-gray-300">${r.serie}</td>
-                <td class="px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hidden md:table-cell" title="${r.bordosDetailed}">${r.temBordos ? `<i class="fas fa-check-circle text-green-500 mr-1"></i> ${r.bordosText}` : 'N/A'}</td>
-                <td class="px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hidden lg:table-cell">${r.gestor}</td>
+                <td class="px-3 py-2 text-sm text-gray-700 dark:text-gray-300">${r.serieRadio}</td>
+                <td class="px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hidden md:table-cell" title="${r.serieBordos}">${r.serieBordos}</td>
+                <td class="px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hidden lg:table-cell">
+                    ${r.gestor}
+                    <span class="ml-2 text-xs text-green-main dark:text-green-400"><i class="fas fa-file-alt"></i></span>
+                </td>
             </tr>
         `).join('');
     } else {
-        // 🌟 CORREÇÃO: Mensagem em Português
         tableRows = `
             <tr>
                 <td colspan="6" class="px-4 py-4 text-center text-gray-500 dark:text-gray-400 italic">
@@ -3491,22 +3918,20 @@ function renderPesquisa() {
         pesquisaPaginator += '</div>';
     }
 
-
     return `
         <div class="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
             <h2 class="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-6 text-center">Pesquisa de Registros Ativos</h2>
             <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
                 <div class="mb-4 flex space-x-2">
-                    <input type="text" id="search-term" placeholder="Buscar por Código, Série, Frota, Bordo..."	
-                        value="${searchTermPesquisa}"	
-                        oninput="handleSearchInput(this, 'searchTermPesquisa', 1)"
-                        class="flex-1 rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-green-main focus:ring-green-main p-2 border dark:bg-gray-700 dark:text-gray-100"
-                    >
-                    <button id="search-button" onclick="document.getElementById('search-term').dispatchEvent(new Event('input'))" class="py-2 px-3 border border-transparent text-sm font-medium rounded-lg text-white bg-green-main hover:bg-green-700 shadow-md" title="Iniciar Busca">
+                    <input type="search" id="search-term" placeholder="Buscar por código, frota, série..." value="${searchTermPesquisa}" oninput="handleSearchInput(this, 'searchTermPesquisa', 1)" class="flex-1 rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-green-main focus:ring-green-main p-2 border dark:bg-gray-700 dark:text-gray-100" autocomplete="off" />
+                    <button id="search-button" class="py-2 px-3 border border-transparent text-sm font-medium rounded-lg text-white bg-green-main hover:bg-green-700 shadow-md" title="Iniciar Busca">
                         <i class="fas fa-search"></i> <span class="hidden sm:inline">Buscar</span>
                     </button>
+
                 </div>
-                
+
+                ${reportHtml}
+
                 <h4 class="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-4 mt-6">Resultados (${filteredRecords.length})</h4>
                 <div class="bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-xl shadow-inner overflow-x-auto">
                     <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
@@ -3527,6 +3952,140 @@ function renderPesquisa() {
             </div>
         </div>
     `;
+}
+
+let radioAmadorCode = '';
+let radioAmadorResult = null;
+
+function renderRadioAmador() {
+    const found = radioAmadorResult;
+
+    const displayLines = found ? `
+        <div class="space-y-1 text-xs leading-tight">
+            <div class="flex justify-between"><span class="text-green-400/70">COD:</span><span class="text-amber-300 font-mono font-bold">${found.codigo}</span></div>
+            <div class="flex justify-between"><span class="text-green-400/70">FROTA:</span><span class="text-white font-mono">${found.frota}</span></div>
+            <div class="flex justify-between"><span class="text-green-400/70">GRUPO:</span><span class="text-white font-mono">${found.grupo}</span></div>
+            <div class="flex justify-between"><span class="text-green-400/70">GESTOR:</span><span class="text-white font-mono">${found.gestor}</span></div>
+            <div class="flex justify-between border-t border-green-800/50 pt-1 mt-1"><span class="text-green-400/70">RADIO:</span><span class="text-cyan-300 font-mono">${found.serieRadio}</span></div>
+            <div class="flex justify-between"><span class="text-green-400/70">BORDOS:</span><span class="text-cyan-300 font-mono truncate max-w-[180px]">${found.serieBordos}</span></div>
+        </div>
+    ` : '<div class="text-green-700/50 text-xs text-center py-4">AGUARDANDO CÓDIGO</div>';
+
+    return `
+        <div class="bg-[#0a0a0a] flex items-center justify-center p-4 rounded-xl my-4">
+            <div class="w-full max-w-md">
+                <div class="bg-gradient-to-b from-[#1a1a2e] to-[#0f0f1a] rounded-2xl p-6 shadow-2xl border border-green-900/40" style="box-shadow: 0 0 40px rgba(0,255,65,0.05), inset 0 0 40px rgba(0,255,65,0.03);">
+                    <div class="text-center mb-4">
+                        <div class="text-green-500/40 text-xs tracking-[0.3em] uppercase mb-1">Link-Frota</div>
+                        <div class="text-green-400/60 text-[10px] tracking-[0.5em] uppercase">Radio Amador</div>
+                    </div>
+
+                    <div class="bg-[#050508] rounded-lg p-4 mb-4 border border-green-900/30 font-mono" style="box-shadow: inset 0 0 20px rgba(0,0,0,0.8), 0 0 10px rgba(0,255,65,0.03);">
+                        <div class="flex items-center justify-between mb-3">
+                            <span class="text-green-500/50 text-[10px] tracking-wider">RX/TX</span>
+                            <span class="text-green-500/30 text-[10px]">
+                                <span class="inline-block w-2 h-2 rounded-full bg-green-500/40 animate-pulse mr-1"></span>
+                                ONLINE
+                            </span>
+                        </div>
+                        <div class="text-center mb-3">
+                            <div class="text-4xl tracking-[0.15em] text-green-400 font-mono font-bold drop-shadow-[0_0_10px_rgba(0,255,65,0.3)]">
+                                ${radioAmadorCode || '---'}
+                            </div>
+                            <div class="text-[10px] text-green-600/50 tracking-[0.3em] mt-1">MHz</div>
+                        </div>
+                        <div class="border-t border-green-900/30 pt-3">
+                            ${displayLines}
+                        </div>
+                        ${found ? `
+                        <div class="border-t border-green-900/30 pt-3 mt-3">
+                            <div class="text-[10px] text-green-600/50 mb-2">SINAL</div>
+                            <div class="flex items-center gap-1">
+                                ${[1,2,3,4,5].map(i => `<div class="h-3 flex-1 rounded-sm ${i <= 5 ? 'bg-green-500/60' : 'bg-green-900/30'}" style="box-shadow: ${i <= 5 ? '0 0 6px rgba(0,255,65,0.4)' : 'none'}"></div>`).join('')}
+                            </div>
+                        </div>
+                        ` : ''}
+                    </div>
+
+                    <div class="flex gap-2 mb-3">
+                        <input type="text" id="radio-amador-input" value="${radioAmadorCode}" placeholder="DIGITE O CÓDIGO" maxlength="10" class="flex-1 bg-[#050508] border border-green-900/40 rounded-lg px-4 py-3 text-green-400 font-mono text-lg tracking-widest text-center placeholder-green-800/40 focus:outline-none focus:border-green-600/60 focus:ring-1 focus:ring-green-600/30 uppercase" autocomplete="off" />
+                    </div>
+
+                    <div class="grid grid-cols-3 gap-2">
+                        <button onclick="radioAmadorBuscar()" class="col-span-2 bg-green-900/30 hover:bg-green-800/40 text-green-400 border border-green-700/40 rounded-lg py-3 font-mono text-sm tracking-wider transition-all active:scale-95">
+                            <i class="fas fa-search mr-2"></i> PESQUISAR
+                        </button>
+                        <button onclick="radioAmadorLimpar()" class="bg-red-900/20 hover:bg-red-800/30 text-red-400 border border-red-700/30 rounded-lg py-3 font-mono text-sm tracking-wider transition-all active:scale-95">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+
+                    <div class="mt-4 text-center">
+                        <button onclick="updateState('page', 'pesquisa')" class="text-green-700/50 hover:text-green-500/70 text-xs font-mono tracking-wider transition-colors">
+                            <i class="fas fa-arrow-left mr-1"></i> VOLTAR À PESQUISA
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function attachRadioAmadorEvents() {
+    const input = document.getElementById('radio-amador-input');
+    if (input) {
+        input.onkeydown = (e) => {
+            if (e.key === 'Enter') {
+                radioAmadorBuscar();
+            }
+        };
+        input.oninput = (e) => {
+            radioAmadorCode = e.target.value.toUpperCase();
+        };
+    }
+}
+
+function radioAmadorBuscar() {
+    const code = radioAmadorCode.trim();
+    if (!code) return;
+
+    radioAmadorResult = null;
+    for (const reg of dbRegistros) {
+        const e = dbEquipamentos.find(item => item.id === reg.equipamentoId) || {};
+        const r = dbRadios.find(item => item.id === reg.radioId) || {};
+        const t = dbBordos.find(item => item.id === reg.telaId && item.tipo === 'Tela') || {};
+        const m = dbBordos.find(item => item.id === reg.magId && item.tipo === 'Mag') || {};
+        const c = dbBordos.find(item => item.id === reg.chipId && item.tipo === 'Chip') || {};
+        const codigo = (e.codigo || '').toUpperCase();
+        const frota = (e.frota || '').toUpperCase();
+        const serieRadio = (r.serie || '').toUpperCase();
+        const term = `${codigo} ${frota} ${serieRadio}`;
+
+        if (term.includes(code)) {
+            const bs = [t.numeroSerie, m.numeroSerie, c.numeroSerie].filter(Boolean);
+            radioAmadorResult = {
+                codigo: e.codigo || 'N/A',
+                frota: e.frota || 'N/A',
+                grupo: e.grupo || 'N/A',
+                gestor: e.gestor || 'Sem Gestor',
+                serieRadio: r.serie || 'N/A',
+                serieBordos: bs.length ? bs.join(' / ') : 'N/A',
+            };
+            break;
+        }
+    }
+
+    if (!radioAmadorResult) {
+        radioAmadorResult = { codigo: '---', frota: 'NÃO ENCONTRADO', grupo: '', gestor: '', serieRadio: '---', serieBordos: '' };
+    }
+
+    renderApp();
+}
+
+function radioAmadorLimpar() {
+    radioAmadorCode = '';
+    radioAmadorResult = null;
+    renderApp();
 }
 
 function renderSettings() {
@@ -3968,6 +4527,9 @@ function attachLoginEvents() {
     const passwordInput = document.getElementById('password');
     const togglePasswordButton = document.getElementById('toggle-password');
     const togglePasswordIcon = document.getElementById('toggle-password-icon');
+    const tempPasswordInput = document.getElementById('temp-password');
+    const toggleTempPasswordButton = document.getElementById('toggle-temp-password');
+    const toggleTempPasswordIcon = document.getElementById('toggle-temp-password-icon');
 
     if (form) {
         form.onsubmit = handleLoginSubmit;	
@@ -3989,6 +4551,15 @@ function attachLoginEvents() {
     // Anexar evento do novo formulário
     if (solicitacaoForm) {
         solicitacaoForm.onsubmit = handleSolicitarAcesso;
+        
+        if (toggleTempPasswordButton && tempPasswordInput) {
+            toggleTempPasswordButton.addEventListener('click', () => {
+                const type = tempPasswordInput.getAttribute('type') === 'password' ? 'text' : 'password';
+                tempPasswordInput.setAttribute('type', type);
+                toggleTempPasswordIcon.classList.toggle('fa-eye');
+                toggleTempPasswordIcon.classList.toggle('fa-eye-slash');
+            });
+        }
     }
 }
 
@@ -4196,11 +4767,38 @@ function loadEquipamentoForEdit(id) {
         document.getElementById('equipamento-modelo').value = equipamento.modelo;
         document.getElementById('equipamento-subgrupo').value = equipamento.subgrupo;
         document.getElementById('equipamento-gestor').value = equipamento.gestor === 'Sem Gestor' ? '' : equipamento.gestor;
+
         showModal('Edição', `Carregando Frota ${equipamento.frota} para edição.`, 'info');
         window.scrollTo(0, 0);
     } else {
         showModal('Erro', 'Equipamento não encontrado.', 'error');
     }
+}
+
+async function deleteEquipamento() {
+    const id = document.getElementById('equipamento-id').value;
+    if (!id) return;
+
+    const hasLink = dbRegistros.some(reg => reg.equipamentoId === id);
+    if (hasLink) {
+        showModal('Ação Bloqueada', 'Não é possível excluir um equipamento que possui vínculos (Rádio e/ou Bordos). Desvincule na aba "Geral" primeiro.', 'error');
+        return;
+    }
+
+    const equipamento = dbEquipamentos.find(e => e.id === id);
+    showConfirmModal('Confirmar Exclusão', `Deseja realmente excluir o Equipamento ${equipamento?.frota || id}? Esta ação não pode ser desfeita.`, async () => {
+        try {
+            const colPath = `artifacts/${appId}/public/data/equipamentos`;
+            await deleteDoc(doc(db, colPath, id));
+            document.getElementById('form-equipamento').reset();
+            document.getElementById('equipamento-id').value = '';
+            await refreshDataFromFirestore();
+            showModal('Sucesso', 'Equipamento excluído permanentemente.', 'success');
+        } catch (error) {
+            console.error('Erro ao excluir equipamento:', error);
+            showModal('Erro', 'Ocorreu um erro ao excluir o equipamento.', 'error');
+        }
+    });
 }
 
 function attachCadastroGeralEvents() {
@@ -4479,7 +5077,7 @@ function attachCadastroGeralEvents() {
                 await batch.commit();
 
                 showModal('Sucesso!', `Novo Vínculo criado. Código: ${codigoDoEquipamento}`, 'success');
-                
+                await refreshDataFromFirestore();
                 // Limpa e atualiza os selects
                 form.reset();
                 if(radioSelect && radioSelect.TomSelect) radioSelect.TomSelect.clear();
@@ -4488,7 +5086,7 @@ function attachCadastroGeralEvents() {
                 if(magSelect && magSelect.TomSelect) magSelect.TomSelect.clear();
                 if(chipSelect && chipSelect.TomSelect) chipSelect.TomSelect.clear();
                 
-                // O listener fará o renderApp, que re-anexará os eventos.
+                // refreshDataFromFirestore() fará o renderApp após atualizar os dados.
                 
             } catch (error) {
                 console.error("Erro ao salvar associação:", error);
@@ -4722,6 +5320,9 @@ const MIN_SPLASH_TIME = 2000;
 let splashStart = 0;
 
 function setupAuthListener() {
+    // Carrega cache offline antes de qualquer requisição à rede
+    loadDataCache();
+
     // [NOVO] Carrega as configurações antes de checar o estado de autenticação para ter a lista de usuários
     loadInitialSettings().then(() => {
         onAuthStateChanged(auth, async (user) => {
@@ -4929,7 +5530,6 @@ function renderApp() {
         } else if (currentUser) {
             if (currentPage === 'cadastro') attachCadastroEvents();
             if (currentPage === 'pesquisa') attachPesquisaEvents();
-            
             // [CORREÇÃO] Chamada da função de eventos principal
             if (currentPage === 'settings') attachSettingsEvents();
             
@@ -4979,6 +5579,7 @@ window.onload = initApp;
 function handleImport(collection, event) {
     const file = event.target.files[0];
     if (!file) return;
+    event.target.value = '';
 
     const reader = new FileReader();
     
@@ -5303,6 +5904,7 @@ async function processImportedData(collectionName, data) {
 
         try {
             await batch.commit();
+            await refreshDataFromFirestore();
             let msg = `${newRecords.length} registros de ${collectionName} importados com sucesso.`;
             if (ignoredCount > 0) {
                 msg += `<br>(${ignoredCount} duplicatas de Série/Frota/Tipo+Série ignoradas.)`;
@@ -5340,6 +5942,7 @@ window.showPermissionModal = showPermissionModal;
 window.renderApp = renderApp;	
 window.updateState = updateState;	
 window.deleteRecord = deleteRecord;	
+window.deleteEquipamento = deleteEquipamento;
 window.toggleRecordAtivo = toggleRecordAtivo; 
 window.loadUserForEdit = loadUserForEdit;
 window.deleteUser = deleteUser;
@@ -5348,6 +5951,14 @@ window.setEquipamentoPage = setEquipamentoPage;
 window.setBordosPage = setBordosPage; // 🌟 NOVO: Expondo paginação Bordos
 window.setGeralPage = setGeralPage;
 window.setPesquisaPage = setPesquisaPage; // 🌟 NOVO: Expondo paginação da pesquisa
+window.abrirRelatorio = abrirRelatorio;
+window.fecharRelatorio = fecharRelatorio;
+window.radioAmadorBuscar = radioAmadorBuscar;
+window.radioAmadorLimpar = radioAmadorLimpar;
+window.showRadioAmadorModal = showRadioAmadorModal;
+window.fecharRadioAmadorModal = fecharRadioAmadorModal;
+window.radioModalBuscar = radioModalBuscar;
+window.exportarCadastroJSON = exportarCadastroJSON;
 window.handleSolicitarAcesso = handleSolicitarAcesso; 
 window.showProfileModal = showProfileModal;
 window.hideProfileModal = hideProfileModal;

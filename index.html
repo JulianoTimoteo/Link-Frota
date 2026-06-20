@@ -1,117 +1,205 @@
 <!DOCTYPE html>
-<html lang="pt-BR" class="light">
+<html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>💻Link-Frota🚚📡</title>
-
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="description" content="Sistema de gestão de frotas agrícolas Link-Frota - Usina Pitangueiras">
+    <meta name="theme-color" content="#40800c">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="Link-Frota">
+    <meta name="format-detection" content="telephone=no">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="application-name" content="Link-Frota">
+    <meta name="apple-touch-fullscreen" content="yes">
+    <meta name="screen-orientation" content="portrait">
+    <link rel="preconnect" href="https://cdn.tailwindcss.com">
+    <link rel="preconnect" href="https://cdnjs.cloudflare.com">
+    <link rel="preconnect" href="https://cdn.jsdelivr.net">
+    <link rel="dns-prefetch" href="https://cdn.tailwindcss.com">
+    <link rel="dns-prefetch" href="https://cdnjs.cloudflare.com">
+    <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
+    <link rel="dns-prefetch" href="https://usinapitangueiras.com.br">
+    <title>Link-Frota | Gestão de Frotas Agrícolas</title>
     <link rel="icon" type="image/x-icon" href="https://usinapitangueiras.com.br/wp-content/uploads/2020/10/cropped-favicon-180x180.png">
     <link rel="apple-touch-icon" href="https://usinapitangueiras.com.br/wp-content/uploads/2020/10/cropped-favicon-180x180.png">
-
+    <link rel="apple-touch-icon" sizes="152x152" href="https://usinapitangueiras.com.br/wp-content/uploads/2020/10/cropped-favicon-180x180.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="https://usinapitangueiras.com.br/wp-content/uploads/2020/10/cropped-favicon-180x180.png">
+    <link rel="mask-icon" href="https://usinapitangueiras.com.br/wp-content/uploads/2020/10/cropped-favicon-180x180.png" color="#40800c">
     <script src="https://cdn.tailwindcss.com"></script>
-
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
-
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-    
     <link href="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/css/tom-select.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/js/tom-select.complete.min.js"></script>
-    
     <link rel="stylesheet" href="style.css">
-    
     <link rel="manifest" href="manifest.json">
-    <meta name="theme-color" content="#40800c">
-
     <script>
-        // Configuração do Tailwind CSS
         tailwind.config = {
             darkMode: 'class',
             theme: {
                 extend: {
                     fontFamily: {
-                        sans: ['Inter', 'sans-serif'],
+                        sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
                     },
                     colors: {
-                        'green-main': '#40800c',
-                        'dark-bg': '#1f2937',
-                        'dark-card': '#374151',
-                    }
-                }
-            }
-        }
+                        'green-main': {
+                            DEFAULT: '#40800c',
+                            light: '#5ca214',
+                            dark: '#2f6009',
+                            50: '#f0f7ec',
+                            100: '#dcebd2',
+                            200: '#b9d7a5',
+                            300: '#96c378',
+                            400: '#73af4b',
+                            500: '#40800c',
+                            600: '#2f6009',
+                            700: '#1f4006',
+                            800: '#0f2003',
+                            900: '#001000',
+                        },
+                        'gray-cool': {
+                            50: '#f9fafb',
+                            100: '#f3f4f6',
+                            200: '#e5e7eb',
+                            300: '#d1d5db',
+                            400: '#9ca3af',
+                            500: '#6b7280',
+                            600: '#4b5563',
+                            700: '#374151',
+                            800: '#1f2937',
+                            900: '#111827',
+                        },
+                    },
+                },
+            },
+        };
 
-        // Script de inicialização do tema
         if (localStorage.getItem('theme') === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
             document.documentElement.classList.add('dark');
         } else {
             document.documentElement.classList.remove('dark');
         }
     </script>
+    <style>
+        [x-cloak] { display: none !important; }
+        .min-h-dvh { min-height: 100dvh; }
+        .safe-top { padding-top: env(safe-area-inset-top); }
+        .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+        .safe-left { padding-left: env(safe-area-inset-left); }
+        .safe-right { padding-right: env(safe-area-inset-right); }
+        .touch-manipulation { touch-action: manipulation; }
+        .modal-enter { animation: modalEnter 0.2s ease-out; }
+        @keyframes modalEnter {
+            from { opacity: 0; transform: scale(0.95) translateY(10px); }
+            to { opacity: 1; transform: scale(1) translateY(0); }
+        }
+        .modal-exit { animation: modalExit 0.15s ease-in forwards; }
+        @keyframes modalExit {
+            from { opacity: 1; transform: scale(1) translateY(0); }
+            to { opacity: 0; transform: scale(0.95) translateY(10px); }
+        }
+        .backdrop-enter { animation: backdropEnter 0.2s ease-out; }
+        @keyframes backdropEnter {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        .backdrop-exit { animation: backdropExit 0.15s ease-in forwards; }
+        @keyframes backdropExit {
+            from { opacity: 1; }
+            to { opacity: 0; }
+        }
+        .skeleton {
+            background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+            background-size: 200% 100%;
+            animation: skeleton-loading 1.5s infinite;
+        }
+        @keyframes skeleton-loading {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+        .sr-only {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border-width: 0;
+        }
+    </style>
 </head>
-<body class="bg-gray-50 dark:bg-gray-900 transition-colors duration-500">
+<body class="antialiased min-h-dvh bg-gray-cool-50 dark:bg-gray-cool-900 text-gray-cool-900 dark:text-gray-cool-100 transition-colors duration-300">
 
     <div id="app" class="min-h-screen"></div>
 
-    <div id="global-modal" class="fixed inset-0 z-50 hidden items-center justify-center p-4 modal-overlay bg-gray-900 bg-opacity-50 backdrop-blur-sm">
-        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-sm transform transition-all scale-100 opacity-100 p-6 border border-gray-200 dark:border-gray-700">
-            <h3 id="modal-title" class="text-xl font-bold text-gray-800 dark:text-gray-100 mb-3">Aviso</h3>
-            <div id="modal-message" class="text-gray-600 dark:text-gray-300 mb-6 text-sm"></div>
-            <div id="modal-actions" class="flex justify-end space-x-3"></div>
+    <div id="global-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" aria-describedby="modal-message" class="fixed inset-0 z-50 hidden items-center justify-center p-4 bg-gray-cool-900/50 backdrop-blur-sm modal-overlay">
+        <div class="bg-white dark:bg-gray-cool-800 rounded-xl shadow-2xl w-full max-w-sm transform transition-all scale-100 opacity-100 p-6 border border-gray-cool-200 dark:border-gray-cool-700 modal-enter">
+            <h3 id="modal-title" class="text-xl font-bold text-gray-cool-800 dark:text-gray-cool-100 mb-3">Aviso</h3>
+            <div id="modal-message" class="text-gray-cool-600 dark:text-gray-cool-300 mb-6 text-sm leading-relaxed"></div>
+            <div id="modal-actions" class="flex flex-col-reverse sm:flex-row justify-end gap-3"></div>
         </div>
     </div>
-    
-    <div id="profile-modal" class="fixed inset-0 z-50 hidden items-center justify-center p-4 modal-overlay bg-gray-900 bg-opacity-50 backdrop-blur-sm">
-        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-2xl transform transition-all scale-100 opacity-100 p-6 border border-gray-200 dark:border-gray-700 max-h-[90vh] overflow-y-auto custom-scrollbar relative">
-            <div class="flex justify-between items-center mb-6 border-b dark:border-gray-700 pb-2">
-                <h3 class="text-2xl font-bold text-gray-800 dark:text-gray-100 flex items-center">
-                    <i class="fas fa-user-circle mr-2 text-green-main"></i> Meu Perfil
-                </h3>
-                <button type="button" onclick="hideProfileModal()" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors" aria-label="Fechar perfil" title="Fechar perfil">
-                    <i class="fas fa-times fa-lg"></i>
+
+    <div id="profile-modal" role="dialog" aria-modal="true" aria-labelledby="profile-modal-title" class="fixed inset-0 z-50 hidden items-center justify-center p-4 bg-gray-cool-900/50 backdrop-blur-sm modal-overlay">
+        <div class="bg-white dark:bg-gray-cool-800 rounded-xl shadow-2xl w-full max-w-2xl transform transition-all scale-100 opacity-100 p-6 border border-gray-cool-200 dark:border-gray-cool-700 max-h-[90vh] overflow-y-auto custom-scrollbar modal-enter">
+            <div class="flex justify-between items-center mb-6 border-b border-gray-cool-200 dark:border-gray-cool-700 pb-3">
+                <h2 id="profile-modal-title" class="text-2xl font-bold text-gray-cool-800 dark:text-gray-cool-100 flex items-center gap-2">
+                    <i class="fas fa-user-circle text-green-main" aria-hidden="true"></i>
+                    <span>Meu Perfil</span>
+                </h2>
+                <button type="button" onclick="hideProfileModal()" class="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg text-gray-cool-400 hover:text-gray-cool-600 dark:hover:text-gray-cool-200 hover:bg-gray-cool-100 dark:hover:bg-gray-cool-700 transition-colors focus:outline-none focus:ring-2 focus:ring-green-main focus:ring-offset-2 dark:focus:ring-offset-gray-cool-800" aria-label="Fechar perfil" title="Fechar perfil">
+                    <i class="fas fa-times fa-lg" aria-hidden="true"></i>
                 </button>
             </div>
-            
             <div id="profile-modal-content" class="space-y-8"></div>
-            
-            <div class="flex justify-end mt-6">
-                <button onclick="hideProfileModal()" class="px-4 py-2 text-sm bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 font-semibold rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors shadow-md">
+            <div class="flex justify-end mt-6 pt-4 border-t border-gray-cool-200 dark:border-gray-cool-700">
+                <button onclick="hideProfileModal()" class="min-h-[44px] px-6 py-3 text-sm font-semibold rounded-lg bg-gray-cool-200 dark:bg-gray-cool-700 text-gray-cool-700 dark:text-gray-cool-200 hover:bg-gray-cool-300 dark:hover:bg-gray-cool-600 focus:outline-none focus:ring-2 focus:ring-green-main focus:ring-offset-2 dark:focus:ring-offset-gray-cool-800 transition-colors shadow-sm active:scale-[0.98]">
                     Fechar
                 </button>
             </div>
         </div>
     </div>
-    
-    <div id="duplicity-modal" class="fixed inset-0 z-50 hidden items-center justify-center p-4 modal-overlay bg-gray-900 bg-opacity-50 backdrop-blur-sm">
-        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-3xl transform transition-all scale-100 opacity-100 p-6 border border-red-200 dark:border-red-800 max-h-[90vh] overflow-y-auto custom-scrollbar relative">
-            <div class="flex justify-between items-center mb-6 border-b dark:border-gray-700 pb-2">
-                <h3 class="text-2xl font-bold text-red-600 flex items-center">
-                    <i class="fas fa-heart-crack mr-2"></i> Integridade de Dados Crítica
-                </h3>
-                <button type="button" onclick="hideDuplicityModal()" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors" title="Fechar aviso" aria-label="Fechar aviso">
-                    <i class="fas fa-times fa-lg"></i>
+
+    <div id="duplicity-modal" role="alertdialog" aria-modal="true" aria-labelledby="duplicity-modal-title" aria-describedby="duplicity-modal-description" class="fixed inset-0 z-50 hidden items-center justify-center p-4 bg-gray-cool-900/50 backdrop-blur-sm modal-overlay">
+        <div class="bg-white dark:bg-gray-cool-800 rounded-xl shadow-2xl w-full max-w-3xl transform transition-all scale-100 opacity-100 p-6 border border-red-200 dark:border-red-800 max-h-[90vh] overflow-y-auto custom-scrollbar modal-enter">
+            <div class="flex justify-between items-center mb-6 border-b border-red-200 dark:border-red-800 pb-3">
+                <h2 id="duplicity-modal-title" class="text-2xl font-bold text-red-600 dark:text-red-400 flex items-center gap-2">
+                    <i class="fas fa-heart-crack" aria-hidden="true"></i>
+                    <span>Integridade de Dados Crítica</span>
+                </h2>
+                <button type="button" onclick="hideDuplicityModal()" class="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg text-gray-cool-400 hover:text-gray-cool-600 dark:hover:text-gray-cool-200 hover:bg-gray-cool-100 dark:hover:bg-gray-cool-700 transition-colors focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 dark:focus:ring-offset-gray-cool-800" aria-label="Fechar aviso" title="Fechar aviso">
+                    <i class="fas fa-times fa-lg" aria-hidden="true"></i>
                 </button>
             </div>
-
-            <p class="text-red-700 dark:text-red-400 font-semibold mb-4">
+            <p id="duplicity-modal-description" class="text-red-700 dark:text-red-400 font-semibold mb-4">
                 Foram encontradas duplicidades críticas. Para garantir a integridade do sistema, analise e remova os registros duplicados.
             </p>
-            
             <div id="duplicity-modal-content" class="space-y-6"></div>
-            
-            <div class="flex justify-end mt-6">
-                <button onclick="hideDuplicityModal()" class="px-4 py-2 text-sm bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 font-semibold rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors shadow-md">
+            <div class="flex justify-end mt-6 pt-4 border-t border-red-200 dark:border-red-800">
+                <button onclick="hideDuplicityModal()" class="min-h-[44px] px-6 py-3 text-sm font-semibold rounded-lg bg-gray-cool-200 dark:bg-gray-cool-700 text-gray-cool-700 dark:text-gray-cool-200 hover:bg-gray-cool-300 dark:hover:bg-gray-cool-600 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 dark:focus:ring-offset-gray-cool-800 transition-colors shadow-sm active:scale-[0.98]">
                     Fechar Aviso
                 </button>
             </div>
         </div>
     </div>
 
-    <div id="pwa-install-modal" class="fixed inset-0 z-[60] hidden items-end sm:items-center justify-center bg-gray-900 bg-opacity-50 backdrop-blur-sm p-4 modal-overlay">
-        <div class="modal-content w-full max-w-md transition-all transform"></div>
+    <div id="pwa-install-modal" role="dialog" aria-modal="true" aria-labelledby="pwa-install-title" class="fixed inset-0 z-[60] hidden items-end sm:items-center justify-center bg-gray-cool-900/50 backdrop-blur-sm p-4 modal-overlay safe-bottom">
+        <div class="modal-content w-full max-w-md transition-all transform bg-white dark:bg-gray-cool-800 rounded-t-2xl sm:rounded-xl shadow-2xl border border-gray-cool-200 dark:border-gray-cool-700 p-6 modal-enter"></div>
     </div>
 
-    <script type="module" src="app.js"></script>
+    <noscript>
+        <div class="fixed inset-0 z-[100] bg-white dark:bg-gray-cool-900 flex items-center justify-center p-6">
+            <div class="text-center">
+                <i class="fas fa-exclamation-triangle text-4xl text-red-500 mb-4" aria-hidden="true"></i>
+                <h1 class="text-2xl font-bold text-gray-cool-800 dark:text-gray-cool-100 mb-2">JavaScript Desabilitado</h1>
+                <p class="text-gray-cool-600 dark:text-gray-cool-300">O Link-Frota requer JavaScript para funcionar corretamente. Por favor, habilite-o nas configurações do seu navegador.</p>
+            </div>
+        </div>
+    </noscript>
 
+    <script type="module" src="app.js"></script>
 </body>
 </html>

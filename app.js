@@ -1491,12 +1491,20 @@ function loadUserForEdit(id) {
         document.getElementById('user-id').value = user.id;
         document.getElementById('user-name').value = user.name;
         document.getElementById('user-username').value = user.username; // Email
-        document.getElementById('user-custom-username').value = user.customUsername || ''; // NOVO: Nome de usuário
+        document.getElementById('user-custom-username').value = user.customUsername || '';
         document.getElementById('user-role').value = user.role;
         
-        // Oculta o campo de senha para edição, a menos que o admin queira alterá-la.
+        // Oculta o campo de senha para edição
         document.getElementById('user-password-field').classList.add('hidden');
-        document.getElementById('user-password').value = ''; 
+        document.getElementById('user-password').value = '';
+
+        // Carrega as permissões do usuário nos checkboxes
+        const perms = user.permissions || { dashboard: true, cadastro: true, pesquisa: true, settings: false };
+        document.getElementById('perm-dashboard').checked = perms.dashboard !== false;
+        document.getElementById('perm-cadastro').checked = perms.cadastro !== false;
+        document.getElementById('perm-pesquisa').checked = perms.pesquisa !== false;
+        document.getElementById('perm-settings').checked = perms.settings === true;
+        document.getElementById('perm-settings').disabled = user.role !== 'admin';
 
         document.getElementById('user-form-title').textContent = 'Editar Perfil de Usuário';
         showModal('Edição', `Carregando perfil de ${user.name} para edição.`, 'info');
@@ -1575,6 +1583,12 @@ async function saveUser(e) {
         userToSave.username = finalEmail;
         userToSave.customUsername = customUsername;
         userToSave.role = role;
+        userToSave.permissions = {
+            dashboard: document.getElementById('perm-dashboard').checked,
+            cadastro: document.getElementById('perm-cadastro').checked,
+            pesquisa: document.getElementById('perm-pesquisa').checked,
+            settings: document.getElementById('perm-settings').checked
+        };
 
         if (password.length >= 6 && customUsername) {
             userToSave.loginPassword = password; 
@@ -1586,7 +1600,12 @@ async function saveUser(e) {
             username: finalEmail, 
             customUsername, 
             role, 
-            permissions: { dashboard: true, cadastro: true, pesquisa: true, settings: role === 'admin' }
+            permissions: {
+                dashboard: document.getElementById('perm-dashboard').checked,
+                cadastro: document.getElementById('perm-cadastro').checked,
+                pesquisa: document.getElementById('perm-pesquisa').checked,
+                settings: document.getElementById('perm-settings').checked
+            }
         };
         if (customUsername) {
             userToSave.loginPassword = password;
@@ -1634,6 +1653,10 @@ async function saveUser(e) {
             if (currentForm) {
                 currentForm.reset();
                 document.getElementById('user-id').value = '';
+                document.getElementById('perm-dashboard').checked = true;
+                document.getElementById('perm-cadastro').checked = true;
+                document.getElementById('perm-pesquisa').checked = true;
+                document.getElementById('perm-settings').checked = false;
                 const titleEl = document.getElementById('user-form-title');
                 if(titleEl) titleEl.textContent = 'Novo Perfil de Usuário';
                 const passField = document.getElementById('user-password-field');
@@ -4195,8 +4218,24 @@ function attachSettingsUsersEvents() {
                 form.reset();
                 document.getElementById('user-id').value = '';
                 document.getElementById('user-form-title').textContent = 'Novo Perfil de Usuário';
-                // Garante que o campo de senha é visível para novo cadastro
+                document.getElementById('perm-dashboard').checked = true;
+                document.getElementById('perm-cadastro').checked = true;
+                document.getElementById('perm-pesquisa').checked = true;
+                document.getElementById('perm-settings').checked = false;
                 document.getElementById('user-password-field').classList.remove('hidden');
+            };
+        }
+        const roleSelect = document.getElementById('user-role');
+        if (roleSelect) {
+            roleSelect.onchange = () => {
+                const settingsCheck = document.getElementById('perm-settings');
+                if (roleSelect.value === 'admin') {
+                    settingsCheck.checked = true;
+                    settingsCheck.disabled = false;
+                } else {
+                    settingsCheck.checked = false;
+                    settingsCheck.disabled = true;
+                }
             };
         }
     }
@@ -4280,6 +4319,34 @@ async function renderSettingsUsers() {
                             <option value="admin">Administrador</option>
                         </select>
                     </div>
+
+                    <div class="border-t border-gray-200 dark:border-gray-600 pt-4">
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Permissões de Acesso</label>
+                        <div class="space-y-2">
+                            <div class="flex items-center">
+                                <input id="perm-dashboard" type="checkbox" checked
+                                    class="h-4 w-4 text-green-main border-gray-300 dark:border-gray-600 rounded focus:ring-green-main dark:bg-gray-700">
+                                <label for="perm-dashboard" class="ml-2 text-sm text-gray-900 dark:text-gray-100">Dashboard</label>
+                            </div>
+                            <div class="flex items-center">
+                                <input id="perm-cadastro" type="checkbox" checked
+                                    class="h-4 w-4 text-green-main border-gray-300 dark:border-gray-600 rounded focus:ring-green-main dark:bg-gray-700">
+                                <label for="perm-cadastro" class="ml-2 text-sm text-gray-900 dark:text-gray-100">Cadastro</label>
+                            </div>
+                            <div class="flex items-center">
+                                <input id="perm-pesquisa" type="checkbox" checked
+                                    class="h-4 w-4 text-green-main border-gray-300 dark:border-gray-600 rounded focus:ring-green-main dark:bg-gray-700">
+                                <label for="perm-pesquisa" class="ml-2 text-sm text-gray-900 dark:text-gray-100">Pesquisa</label>
+                            </div>
+                            <div class="flex items-center">
+                                <input id="perm-settings" type="checkbox"
+                                    class="h-4 w-4 text-green-main border-gray-300 dark:border-gray-600 rounded focus:ring-green-main dark:bg-gray-700">
+                                <label for="perm-settings" class="ml-2 text-sm text-gray-900 dark:text-gray-100">Configurações <span class="text-xs text-red-500 dark:text-red-400">(Admin-Only)</span></label>
+                            </div>
+                        </div>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-2">Desmarque as abas que o usuário não deve acessar.</p>
+                    </div>
+
                     <div class="flex space-x-3">
                         <button type="submit" class="flex-1 w-full flex justify-center py-2 px-3 border border-transparent text-sm font-medium rounded-lg text-white bg-green-main hover:bg-green-700 shadow-md">
                             <i class="fas fa-save mr-2"></i> Salvar Perfil

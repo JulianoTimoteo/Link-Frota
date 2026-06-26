@@ -208,6 +208,183 @@ const BORDO_IMPORT_INFO = `
     <p class="mt-2 text-red-500 font-semibold">Atenção: A coluna "Tipo" deve ter um dos valores exatos: Tela, Mag ou Chip.</p>
 `;
 
+const VINCULO_IMPORT_INFO = `
+    <p class="mb-3">Importe uma planilha com os vínculos já prontos. O sistema irá criar os registros em lote, associando automaticamente Frota, Rádio, Tela, Mag e Chip pelos seus números de série.</p>
+    <p class="font-semibold mb-1">Colunas obrigatórias no arquivo CSV ou XLSX:</p>
+    <ul class="list-disc list-inside mt-1 space-y-1">
+        <li><span class="font-semibold">Frota</span> — número da frota já cadastrada no sistema</li>
+        <li><span class="font-semibold">Serie Radio</span> — número de série do rádio (deixe vazio se não houver)</li>
+        <li><span class="font-semibold">Serie Tela</span> — número de série da tela (deixe vazio se não houver)</li>
+        <li><span class="font-semibold">Serie Mag</span> — número de série do mag (deixe vazio se não houver)</li>
+        <li><span class="font-semibold">Serie Chip</span> — número de série do chip (deixe vazio se não houver)</li>
+    </ul>
+    <p class="mt-3 text-yellow-600 dark:text-yellow-400 font-semibold">⚠ Regras importantes:</p>
+    <ul class="list-disc list-inside mt-1 space-y-1 text-sm">
+        <li>A Frota deve estar cadastrada e <strong>sem vínculo ativo</strong>.</li>
+        <li>Rádio, Tela, Mag e Chip devem estar cadastrados com status <strong>Disponível</strong>.</li>
+        <li>Se informar Tela, Mag ou Chip, os <strong>3 são obrigatórios</strong> (kit completo).</li>
+        <li>Ao menos Rádio ou o kit Tela+Mag+Chip deve ser informado.</li>
+        <li>Frotas já vinculadas no arquivo serão ignoradas.</li>
+    </ul>
+`;
+
+// Importação em Lote de Vínculos
+function handleImportVinculos(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    event.target.value = '';
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const data = e.target.result;
+        if (file.name.endsWith('.csv')) {
+            Papa.parse(data, {
+                header: true, skipEmptyLines: true,
+                complete: function(results) { processImportVinculos(results.data); }
+            });
+        } else if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
+            const workbook = XLSX.read(data, { type: 'binary' });
+            const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+            processImportVinculos(XLSX.utils.sheet_to_json(worksheet));
+        } else {
+            showModal('Erro', 'Formato não suportado. Use CSV ou XLSX.', 'error');
+        }
+    };
+    if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) reader.readAsBinaryString(file);
+    else reader.readAsText(file);
+}
+
+async function processImportVinculos(rows) {
+    if (!db || !appId) {
+        showModal('Erro', 'Conexão com o banco de dados perdida.', 'error');
+        return;
+    }
+
+    // Índices por série para lookup rápido
+    const radioBysSerie  = dbRadios.reduce((acc, r) => { acc[String(r.serie || '').trim().toUpperCase()] = r; return acc; }, {});
+    const equipByFrota   = dbEquipamentos.reduce((acc, e) => { acc[String(e.frota || '').trim().toUpperCase()] = e; return acc; }, {});
+    const bordoByTipeSerie = dbBordos.reduce((acc, b) => {
+        const key = `${b.tipo?.toUpperCase()}||${String(b.numeroSerie || '').trim().toUpperCase()}`;
+        acc[key] = b;
+        return acc;
+    }, {});
+
+    // Frotas já vinculadas
+    const frotasJaVinculadas = new Set(dbRegistros.map(r => r.equipamentoId));
+
+    const batch       = writeBatch(db);
+    const registrosRef = `artifacts/${appId}/public/data/registros`;
+    const radiosRef    = `artifacts/${appId}/public/data/radios`;
+    const bordosRef    = `artifacts/${appId}/public/data/bordos`;
+
+    let criados = 0;
+    const erros = [];
+    const frotasNesteLote = new Set();
+
+    for (const row of rows) {
+        const frota     = String(row['Frota'] || '').trim().toUpperCase();
+        const serieRad  = String(row['Serie Radio'] || '').trim().toUpperCase();
+        const serieTela = String(row['Serie Tela'] || '').trim().toUpperCase();
+        const serieMag  = String(row['Serie Mag']  || '').trim().toUpperCase();
+        const serieChip = String(row['Serie Chip'] || '').trim().toUpperCase();
+
+        if (!frota) { erros.push(`Linha ignorada: Frota não informada.`); continue; }
+
+        const equipamento = equipByFrota[frota];
+        if (!equipamento) { erros.push(`Frota <b>${frota}</b>: não encontrada no cadastro.`); continue; }
+        if (frotasJaVinculadas.has(equipamento.id)) { erros.push(`Frota <b>${frota}</b>: já possui vínculo ativo — ignorada.`); continue; }
+        if (frotasNesteLote.has(equipamento.id))    { erros.push(`Frota <b>${frota}</b>: duplicada no arquivo — ignorada.`); continue; }
+
+        // Resolver Rádio
+        let radioId = null;
+        if (serieRad) {
+            const radio = radioBysSerie[serieRad];
+            if (!radio)                       { erros.push(`Frota <b>${frota}</b>: Rádio série <b>${serieRad}</b> não encontrado.`); continue; }
+            if (radio.status !== 'Disponível'){ erros.push(`Frota <b>${frota}</b>: Rádio <b>${serieRad}</b> não está Disponível (${radio.status}).`); continue; }
+            radioId = radio.id;
+        }
+
+        // Resolver Bordos
+        let telaId = null, magId = null, chipId = null;
+        const temAlgumBordo = serieTela || serieMag || serieChip;
+        if (temAlgumBordo) {
+            if (!serieTela || !serieMag || !serieChip) {
+                erros.push(`Frota <b>${frota}</b>: kit incompleto — Tela, Mag e Chip são obrigatórios juntos.`); continue;
+            }
+            const tela = bordoByTipeSerie[`TELA||${serieTela}`];
+            const mag  = bordoByTipeSerie[`MAG||${serieMag}`];
+            const chip = bordoByTipeSerie[`CHIP||${serieChip}`];
+
+            if (!tela) { erros.push(`Frota <b>${frota}</b>: Tela série <b>${serieTela}</b> não encontrada.`); continue; }
+            if (!mag)  { erros.push(`Frota <b>${frota}</b>: Mag série <b>${serieMag}</b> não encontrado.`); continue; }
+            if (!chip) { erros.push(`Frota <b>${frota}</b>: Chip série <b>${serieChip}</b> não encontrado.`); continue; }
+
+            if (tela.status !== 'Disponível') { erros.push(`Frota <b>${frota}</b>: Tela <b>${serieTela}</b> não está Disponível.`); continue; }
+            if (mag.status  !== 'Disponível') { erros.push(`Frota <b>${frota}</b>: Mag <b>${serieMag}</b> não está Disponível.`); continue; }
+            if (chip.status !== 'Disponível') { erros.push(`Frota <b>${frota}</b>: Chip <b>${serieChip}</b> não está Disponível.`); continue; }
+
+            telaId = tela.id; magId = mag.id; chipId = chip.id;
+        }
+
+        if (!radioId && !telaId) {
+            erros.push(`Frota <b>${frota}</b>: nenhum componente válido informado (Rádio ou kit Tela+Mag+Chip).`); continue;
+        }
+
+        // Gerar código do equipamento se não tiver
+        const codigo = equipamento.codigo || `COD-${equipamento.frota}`;
+
+        // Criar registro
+        const newRegRef = doc(collection(db, registrosRef));
+        batch.set(newRegRef, {
+            equipamentoId: equipamento.id,
+            codigo,
+            radioId: radioId || null,
+            telaId:  telaId  || null,
+            magId:   magId   || null,
+            chipId:  chipId  || null,
+            createdAt: new Date().toISOString()
+        });
+
+        // Marcar rádio como Vinculado
+        if (radioId) {
+            batch.update(doc(db, radiosRef, radioId), { status: 'Vinculado' });
+        }
+        // Marcar bordos como Vinculado
+        if (telaId) batch.update(doc(db, bordosRef, telaId), { status: 'Vinculado' });
+        if (magId)  batch.update(doc(db, bordosRef, magId),  { status: 'Vinculado' });
+        if (chipId) batch.update(doc(db, bordosRef, chipId), { status: 'Vinculado' });
+
+        frotasNesteLote.add(equipamento.id);
+        criados++;
+    }
+
+    if (criados === 0 && erros.length === 0) {
+        showModal('Importação', 'Nenhuma linha válida encontrada no arquivo.', 'info');
+        return;
+    }
+
+    try {
+        if (criados > 0) await batch.commit();
+        await refreshDataFromFirestore();
+
+        const erroHtml = erros.length > 0
+            ? `<div class="mt-3 text-sm text-red-600 dark:text-red-400 max-h-40 overflow-y-auto space-y-1 border border-red-200 dark:border-red-800 rounded p-2">
+                <p class="font-semibold mb-1">⚠ ${erros.length} linha(s) com problema:</p>
+                ${erros.map(e => `<p>• ${e}</p>`).join('')}
+               </div>` : '';
+
+        const tipo = criados > 0 ? 'success' : 'warning';
+        showModal(
+            'Importação Concluída',
+            `<p><b>${criados}</b> vínculo(s) criado(s) com sucesso.</p>${erroHtml}`,
+            tipo
+        );
+    } catch (error) {
+        console.error('Erro ao importar vínculos:', error);
+        showModal('Erro', 'Ocorreu um erro ao salvar os vínculos no banco de dados.', 'error');
+    }
+}
+
 
 // 🌟 NOVO: Função central de verificação de duplicidades
 function checkDuplicities() {
@@ -3577,7 +3754,9 @@ function renderCadastroGeral() {
                 <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300">${frotaDisplay}</td>
                 <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300">${r.serie}</td>
                 <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hidden sm:table-cell">${e.grupo}</td>
-                <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hidden md:table-cell">${bordoStatus}</td>
+                <td class="px-4 py-2 text-xs text-gray-700 dark:text-gray-300 hidden md:table-cell font-mono">${t.numeroSerie !== 'N/A' ? t.numeroSerie : '<span class="text-gray-400 italic">N/A</span>'}</td>
+                <td class="px-4 py-2 text-xs text-gray-700 dark:text-gray-300 hidden md:table-cell font-mono">${m.numeroSerie !== 'N/A' ? m.numeroSerie : '<span class="text-gray-400 italic">N/A</span>'}</td>
+                <td class="px-4 py-2 text-xs text-gray-700 dark:text-gray-300 hidden md:table-cell font-mono">${c.numeroSerie !== 'N/A' ? c.numeroSerie : '<span class="text-gray-400 italic">N/A</span>'}</td>
                 <td class="px-4 py-2 whitespace-nowrap text-sm font-medium">
                     ${actionsHtml}
                 </td>
@@ -3669,10 +3848,26 @@ function renderCadastroGeral() {
             <div class="lg:col-span-2">
                 <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center mb-4 gap-2">
                     <h4 class="text-lg font-semibold text-gray-800 dark:text-gray-100">Registros de Vínculos Ativos (Total: ${dbRegistros.length})</h4>
-                    <input type="text" id="geral-search-input" value="${geralSearch}"	
-                        oninput="handleSearchInput(this, 'geralSearch', 1)"	
-                        placeholder="Buscar Código, Série ou Frota..."	
-                        class="rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-green-main focus:ring-green-main p-2 border text-sm w-full sm:w-1/2 dark:bg-gray-700 dark:text-gray-100">
+                    <div class="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+                        <input type="text" id="geral-search-input" value="${geralSearch}"	
+                            oninput="handleSearchInput(this, 'geralSearch', 1)"	
+                            placeholder="Buscar Código, Série ou Frota..."	
+                            class="rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-green-main focus:ring-green-main p-2 border text-sm w-full sm:w-48 dark:bg-gray-700 dark:text-gray-100">
+                        <button
+                            onclick="document.getElementById('geral-import-vinculos-file').click()"
+                            class="flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium rounded-lg text-white bg-indigo-600 hover:bg-indigo-700 shadow-md transition-colors whitespace-nowrap"
+                            title="Importar planilha com vínculos em lote (Frota, Rádio, Tela, Mag, Chip)">
+                            <i class="fas fa-file-import"></i>
+                            <span>Importar Vínculos</span>
+                        </button>
+                        <input type="file" id="geral-import-vinculos-file" accept=".csv,.xlsx,.xls" class="hidden" onchange="handleImportVinculos(event)">
+                        <button
+                            onclick="showModal('Instruções — Importar Vínculos em Lote', window.VINCULO_IMPORT_INFO, 'info')"
+                            class="flex items-center justify-center gap-1 px-2 py-2 text-sm font-medium rounded-lg text-indigo-600 dark:text-indigo-400 border border-indigo-300 dark:border-indigo-700 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-colors"
+                            title="Ver instruções de importação">
+                            <i class="fas fa-question-circle"></i>
+                        </button>
+                    </div>
                 </div>
                 <div class="bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-xl shadow-inner overflow-x-auto">
                     <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
@@ -3682,7 +3877,9 @@ function renderCadastroGeral() {
                                 <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Frota</th>
                                 <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Série Rádio</th>
                                 <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase hidden sm:table-cell">Grupo</th>
-                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase hidden md:table-cell">Bordos</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase hidden md:table-cell">Tela</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase hidden md:table-cell">Mag</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase hidden md:table-cell">Chip</th>
                                 <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Ações</th>
                             </tr>
                         </thead>
@@ -3751,7 +3948,9 @@ function renderCadastroGeral() {
                                     <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300">${frotaDisplay}</td>
                                     <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300">${r.serie}</td>
                                     <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hidden sm:table-cell">${e.grupo}</td>
-                                    <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hidden md:table-cell">${bordoStatus}</td>
+                                    <td class="px-4 py-2 text-xs text-gray-700 dark:text-gray-300 hidden md:table-cell font-mono">${t.numeroSerie !== 'N/A' ? t.numeroSerie : '<span class="text-gray-400 italic">N/A</span>'}</td>
+                                    <td class="px-4 py-2 text-xs text-gray-700 dark:text-gray-300 hidden md:table-cell font-mono">${m.numeroSerie !== 'N/A' ? m.numeroSerie : '<span class="text-gray-400 italic">N/A</span>'}</td>
+                                    <td class="px-4 py-2 text-xs text-gray-700 dark:text-gray-300 hidden md:table-cell font-mono">${c.numeroSerie !== 'N/A' ? c.numeroSerie : '<span class="text-gray-400 italic">N/A</span>'}</td>
                                     <td class="px-4 py-2 whitespace-nowrap text-sm font-medium">
                                         ${actionsHtml}
                                     </td>
@@ -3915,7 +4114,9 @@ function renderPesquisa() {
                 <td class="px-3 py-2 text-sm text-gray-700 dark:text-gray-300">${r.frota}</td>
                 <td class="px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hidden sm:table-cell">${r.grupo}</td>
                 <td class="px-3 py-2 text-sm text-gray-700 dark:text-gray-300">${r.serieRadio}</td>
-                <td class="px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hidden md:table-cell" title="${r.serieBordos}">${r.serieBordos}</td>
+                <td class="px-3 py-2 text-xs text-gray-700 dark:text-gray-300 hidden md:table-cell font-mono" title="Tela: ${r.tela.numeroSerie || 'N/A'}">${r.tela.numeroSerie || '<span class="text-gray-400 italic">N/A</span>'}</td>
+                <td class="px-3 py-2 text-xs text-gray-700 dark:text-gray-300 hidden md:table-cell font-mono" title="Mag: ${r.mag.numeroSerie || 'N/A'}">${r.mag.numeroSerie || '<span class="text-gray-400 italic">N/A</span>'}</td>
+                <td class="px-3 py-2 text-xs text-gray-700 dark:text-gray-300 hidden md:table-cell font-mono" title="Chip: ${r.chip.numeroSerie || 'N/A'}">${r.chip.numeroSerie || '<span class="text-gray-400 italic">N/A</span>'}</td>
                 <td class="px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hidden lg:table-cell">
                     ${r.gestor}
                     <span class="ml-2 text-xs text-green-main dark:text-green-400"><i class="fas fa-file-alt"></i></span>
@@ -3925,7 +4126,7 @@ function renderPesquisa() {
     } else {
         tableRows = `
             <tr>
-                <td colspan="6" class="px-4 py-4 text-center text-gray-500 dark:text-gray-400 italic">
+                <td colspan="8" class="px-4 py-4 text-center text-gray-500 dark:text-gray-400 italic">
                     Nenhum registro ativo encontrado.
                 </td>
             </tr>
@@ -3964,7 +4165,9 @@ function renderPesquisa() {
                                 <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Frota</th>
                                 <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase hidden sm:table-cell">Grupo</th>
                                 <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Série Rádio</th>
-                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase hidden md:table-cell">Séries Bordos</th>
+                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase hidden md:table-cell">Tela</th>
+                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase hidden md:table-cell">Mag</th>
+                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase hidden md:table-cell">Chip</th>
                                 <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase hidden lg:table-cell">Gestor</th>
                             </tr>
                         </thead>
@@ -6050,6 +6253,8 @@ window.changePassword = changePassword;
 window.RADIO_IMPORT_INFO = RADIO_IMPORT_INFO;
 window.EQUIPAMENTO_IMPORT_INFO = EQUIPAMENTO_IMPORT_INFO;
 window.BORDO_IMPORT_INFO = BORDO_IMPORT_INFO; // 🌟 NOVO: Expondo constante de Bordo
+window.VINCULO_IMPORT_INFO = VINCULO_IMPORT_INFO;
+window.handleImportVinculos = handleImportVinculos;
 window.toggleTheme = toggleTheme;
 
 

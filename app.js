@@ -209,41 +209,15 @@ const BORDO_IMPORT_INFO = `
 `;
 
 const VINCULO_IMPORT_INFO = `
-    <p class="mb-2 font-semibold">Planilha universal — cria cadastros e vínculos em uma só importação.</p>
-    <table class="text-xs w-full border-collapse mb-3">
-        <thead><tr class="bg-gray-100 dark:bg-gray-700">
-            <th class="border border-gray-300 dark:border-gray-600 px-2 py-1 text-left">Coluna</th>
-            <th class="border border-gray-300 dark:border-gray-600 px-2 py-1 text-left">Obrig.?</th>
-            <th class="border border-gray-300 dark:border-gray-600 px-2 py-1 text-left">Descrição</th>
-        </tr></thead>
-        <tbody>
-            <tr><td class="border border-gray-300 dark:border-gray-600 px-2 py-1 font-semibold">Frota</td><td class="border border-gray-300 dark:border-gray-600 px-2 py-1 text-green-600">Sim</td><td class="border border-gray-300 dark:border-gray-600 px-2 py-1">Número da frota</td></tr>
-            <tr><td class="border border-gray-300 dark:border-gray-600 px-2 py-1 font-semibold">Grupo</td><td class="border border-gray-300 dark:border-gray-600 px-2 py-1 text-yellow-600">Novo</td><td class="border border-gray-300 dark:border-gray-600 px-2 py-1">Colheita / Transporte / Oficina / TPL / Industria</td></tr>
-            <tr><td class="border border-gray-300 dark:border-gray-600 px-2 py-1 font-semibold">Modelo Equipamento</td><td class="border border-gray-300 dark:border-gray-600 px-2 py-1 text-yellow-600">Novo</td><td class="border border-gray-300 dark:border-gray-600 px-2 py-1">Modelo do equipamento (ex: JD 3522)</td></tr>
-            <tr><td class="border border-gray-300 dark:border-gray-600 px-2 py-1 font-semibold">Subgrupo</td><td class="border border-gray-300 dark:border-gray-600 px-2 py-1 text-yellow-600">Novo</td><td class="border border-gray-300 dark:border-gray-600 px-2 py-1">Descrição do equipamento</td></tr>
-            <tr><td class="border border-gray-300 dark:border-gray-600 px-2 py-1 font-semibold">Gestor</td><td class="border border-gray-300 dark:border-gray-600 px-2 py-1 text-gray-400">Opcional</td><td class="border border-gray-300 dark:border-gray-600 px-2 py-1">Nome do gestor responsável</td></tr>
-            <tr><td class="border border-gray-300 dark:border-gray-600 px-2 py-1 font-semibold">Serie Radio</td><td class="border border-gray-300 dark:border-gray-600 px-2 py-1 text-gray-400">Opcional</td><td class="border border-gray-300 dark:border-gray-600 px-2 py-1">Série do rádio a vincular ou cadastrar</td></tr>
-            <tr><td class="border border-gray-300 dark:border-gray-600 px-2 py-1 font-semibold">Modelo Radio</td><td class="border border-gray-300 dark:border-gray-600 px-2 py-1 text-yellow-600">c/ Rádio</td><td class="border border-gray-300 dark:border-gray-600 px-2 py-1">Obrigatório se o rádio for novo</td></tr>
-            <tr><td class="border border-gray-300 dark:border-gray-600 px-2 py-1 font-semibold">Serie Tela</td><td class="border border-gray-300 dark:border-gray-600 px-2 py-1 text-gray-400">Opcional</td><td class="border border-gray-300 dark:border-gray-600 px-2 py-1">Série da tela (kit exige os 3)</td></tr>
-            <tr><td class="border border-gray-300 dark:border-gray-600 px-2 py-1 font-semibold">Modelo Tela</td><td class="border border-gray-300 dark:border-gray-600 px-2 py-1 text-yellow-600">c/ Tela nova</td><td class="border border-gray-300 dark:border-gray-600 px-2 py-1">Obrigatório se a tela for nova</td></tr>
-            <tr><td class="border border-gray-300 dark:border-gray-600 px-2 py-1 font-semibold">Serie Mag</td><td class="border border-gray-300 dark:border-gray-600 px-2 py-1 text-gray-400">Opcional</td><td class="border border-gray-300 dark:border-gray-600 px-2 py-1">Série do mag</td></tr>
-            <tr><td class="border border-gray-300 dark:border-gray-600 px-2 py-1 font-semibold">Modelo Mag</td><td class="border border-gray-300 dark:border-gray-600 px-2 py-1 text-yellow-600">c/ Mag novo</td><td class="border border-gray-300 dark:border-gray-600 px-2 py-1">Obrigatório se o mag for novo</td></tr>
-            <tr><td class="border border-gray-300 dark:border-gray-600 px-2 py-1 font-semibold">Serie Chip</td><td class="border border-gray-300 dark:border-gray-600 px-2 py-1 text-gray-400">Opcional</td><td class="border border-gray-300 dark:border-gray-600 px-2 py-1">Série do chip</td></tr>
-            <tr><td class="border border-gray-300 dark:border-gray-600 px-2 py-1 font-semibold">Modelo Chip</td><td class="border border-gray-300 dark:border-gray-600 px-2 py-1 text-yellow-600">c/ Chip novo</td><td class="border border-gray-300 dark:border-gray-600 px-2 py-1">Obrigatório se o chip for novo</td></tr>
-        </tbody>
-    </table>
-    <p class="text-xs text-yellow-600 dark:text-yellow-400 font-semibold">⚠ Regras:</p>
-    <ul class="list-disc list-inside text-xs mt-1 space-y-0.5">
-        <li>Frotas/rádios/bordos <b>já cadastrados</b> são reutilizados — não duplicados.</li>
-        <li>Itens sem vínculo ficam como <b>Disponível</b>.</li>
-        <li>Kit bordo: Tela+Mag+Chip <b>todos ou nenhum</b>.</li>
-        <li>Frota já vinculada: vínculo <b>ignorado</b>, cadastro atualizado.</li>
-        <li>Série repetida no arquivo: segunda ocorrência ignorada.</li>
-    </ul>
+    <p class="text-sm text-gray-600 dark:text-gray-300 mb-2">
+        <strong>Colunas:</strong> Código, Frota, Série Rádio / Modelo, Grupo, Tela / Modelo, Mag / Modelo, Chip, Gestor.
+    </p>
+    <p class="text-sm text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/30 p-2 rounded border border-amber-300 dark:border-amber-700">
+        ⚠ Itens existentes são reutilizados. Tela+Mag+Chip juntos ou nenhum. Frota opcional. Equipamentos já vinculados são ignorados. "Série / Modelo" separados por "/".
+    </p>
 `;
 
-// Importação Universal (cadastro + vínculos em lote)
-function handleImportVinculos(event) {
+function handleImport(type, event) {
     const file = event.target.files[0];
     if (!file) return;
     event.target.value = '';
@@ -252,11 +226,11 @@ function handleImportVinculos(event) {
         const data = e.target.result;
         if (file.name.endsWith('.csv')) {
             Papa.parse(data, { header: true, skipEmptyLines: true,
-                complete: function(results) { processImportVinculos(results.data); }
+                complete: function(results) { processGenericImport(type, results.data); }
             });
         } else if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
             const wb = XLSX.read(data, { type: 'binary' });
-            processImportVinculos(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]));
+            processGenericImport(type, XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]));
         } else {
             showModal('Erro', 'Formato não suportado. Use CSV ou XLSX.', 'error');
         }
@@ -265,10 +239,44 @@ function handleImportVinculos(event) {
     else reader.readAsText(file);
 }
 
+async function processGenericImport(type, rows) {
+    if (!rows || rows.length === 0) {
+        showModal('Aviso', 'O arquivo está vazio.', 'warning');
+        return;
+    }
+    
+    try {
+        let count = 0;
+        if (type === 'vinculos') {
+            await processImportVinculos(rows);
+            updateState();
+            return;
+        } else {
+            for (const row of rows) {
+                if (type === 'radios') {
+                    await saveRadio({...row});
+                    count++;
+                } else if (type === 'equipamentos') {
+                    await saveEquipamento({...row});
+                    count++;
+                } else if (type === 'bordos') {
+                    await saveBordo({...row});
+                    count++;
+                }
+            }
+        }
+        showModal('Sucesso', `${count} itens de ${type} importados com sucesso!`, 'success');
+        updateState();
+    } catch (error) {
+        console.error('Erro na importação:', error);
+        showModal('Erro', 'Ocorreu um erro ao processar a importação.', 'error');
+    }
+}
+    
+    
 async function processImportVinculos(rows) {
     if (!db || !appId) { showModal('Erro', 'Conexão com o banco de dados perdida.', 'error'); return; }
 
-    // ── Índices em memória (serão atualizados conforme cadastramos itens novos) ──
     const radiosBySerie    = {};
     dbRadios.forEach(r    => { radiosBySerie[String(r.serie || '').trim().toUpperCase()] = r; });
     const equipsByFrota    = {};
@@ -276,14 +284,13 @@ async function processImportVinculos(rows) {
     const bordosByKey      = {};
     dbBordos.forEach(b    => { bordosByKey[`${(b.tipo||'').toUpperCase()}||${String(b.numeroSerie||'').trim().toUpperCase()}`] = b; });
 
-    const frotasJaVinculadas = new Set(dbRegistros.map(r => r.equipamentoId));
+    const equipsJaVinculados = new Set(dbRegistros.map(r => r.equipamentoId));
 
     const colEquip    = `artifacts/${appId}/public/data/equipamentos`;
     const colRadios   = `artifacts/${appId}/public/data/radios`;
     const colBordos   = `artifacts/${appId}/public/data/bordos`;
     const colRegistros= `artifacts/${appId}/public/data/registros`;
 
-    // Firestore tem limite de 500 operações por batch — usamos múltiplos batches
     const batches = [];
     let currentBatch = writeBatch(db);
     let opCount = 0;
@@ -297,58 +304,85 @@ async function processImportVinculos(rows) {
     const frotasNesteArquivo = new Set();
     const seriesRadioNesteArquivo = new Set();
 
+    const parseSerieModelo = (val) => {
+        if (!val) return { serie: '', modelo: '' };
+        const idx = val.indexOf('/');
+        if (idx === -1) return { serie: val.trim().toUpperCase(), modelo: '' };
+        return { serie: val.slice(0, idx).trim().toUpperCase(), modelo: val.slice(idx + 1).trim() };
+    };
+
     for (const row of rows) {
         const v = (col) => String(row[col] || '').trim();
+        const codigo       = v('Código');
         const frota        = v('Frota').toUpperCase();
         const grupo        = v('Grupo');
-        const modeloEquip  = v('Modelo Equipamento');
-        const subgrupo     = v('Subgrupo');
-        const gestor       = v('Gestor') || 'Sem Gestor';
-        const serieRadStr  = v('Serie Radio').toUpperCase();
-        const modeloRad    = v('Modelo Radio');
-        const serieTelStr  = v('Serie Tela').toUpperCase();
-        const modeloTela   = v('Modelo Tela');
-        const serieMagStr  = v('Serie Mag').toUpperCase();
-        const modeloMag    = v('Modelo Mag');
-        const serieChipStr = v('Serie Chip').toUpperCase();
-        const modeloChip   = v('Modelo Chip');
+        const gestor       = v('Gestor');
 
-        if (!frota) { log.avisos.push('Linha ignorada: coluna <b>Frota</b> vazia.'); continue; }
-        if (frotasNesteArquivo.has(frota)) { log.avisos.push(`Frota <b>${frota}</b>: duplicada no arquivo — segunda ocorrência ignorada.`); continue; }
-        frotasNesteArquivo.add(frota);
+        const radioData    = parseSerieModelo(v('Série Rádio / Modelo'));
+        const telaData     = parseSerieModelo(v('Tela / Modelo'));
+        const magData      = parseSerieModelo(v('Mag / Modelo'));
+        const chipSerie    = v('Chip').toUpperCase();
 
-        // ── FASE 1A: Garantir que o Equipamento existe ──────────────────────────
-        let equipamento = equipsByFrota[frota];
-        if (!equipamento) {
-            if (!grupo || !modeloEquip || !subgrupo) {
-                log.avisos.push(`Frota <b>${frota}</b>: equipamento não cadastrado e dados insuficientes para criar (Grupo, Modelo Equipamento, Subgrupo obrigatórios).`);
+        if (!frota && !radioData.serie && !telaData.serie && !magData.serie && !chipSerie) {
+            log.avisos.push('Linha ignorada: sem Frota e sem dados de vínculo.');
+            continue;
+        }
+
+        if (frota && frotasNesteArquivo.has(frota)) {
+            log.avisos.push(`Frota <b>${frota}</b>: duplicada no arquivo — ignorada.`);
+            continue;
+        }
+        if (frota) frotasNesteArquivo.add(frota);
+
+        let equipamento = frota ? equipsByFrota[frota] : null;
+
+        if (frota && !equipamento) {
+            if (!grupo) {
+                log.avisos.push(`Frota <b>${frota}</b>: equipamento não existe e Grupo não informado — não foi possível criar.`);
                 continue;
             }
             if (!GROUPS.includes(grupo)) {
-                log.avisos.push(`Frota <b>${frota}</b>: Grupo "<b>${grupo}</b>" inválido. Use: ${GROUPS.join(', ')}.`);
+                log.avisos.push(`Frota <b>${frota}</b>: Grupo "<b>${grupo}</b>" inválido.`);
                 continue;
             }
             const newRef = doc(collection(db, colEquip));
-            const newEquip = { id: newRef.id, frota, grupo, modelo: modeloEquip, subgrupo, gestor, ativo: true, createdAt: new Date().toISOString() };
+            const newEquip = { id: newRef.id, frota, grupo, modelo: '', subgrupo: '', gestor: gestor || 'Sem Gestor', ativo: true, createdAt: new Date().toISOString() };
             pushOp(b => b.set(newRef, newEquip));
             equipsByFrota[frota] = newEquip;
             equipamento = newEquip;
             log.equipCriados++;
         }
 
-        // ── FASE 1B: Garantir que o Rádio existe (se informado) ─────────────────
+        if (!equipamento) {
+            log.avisos.push(frota ? `Frota <b>${frota}</b>: equipamento não encontrado no banco.` : 'Frota não informada — equipamento não encontrado.');
+            continue;
+        }
+
+        if (equipsJaVinculados.has(equipamento.id)) {
+            log.avisos.push(`Frota <b>${frota}</b>: já possui vínculo ativo — ignorado.`);
+            continue;
+        }
+
+        if (gestor && equipamento.gestor !== gestor) {
+            pushOp(b => b.update(doc(db, colEquip, equipamento.id), { gestor }));
+            equipamento.gestor = gestor;
+        }
+
+        const serieRadStr = radioData.serie;
+        const modeloRad   = radioData.modelo;
         let radioObj = null;
+
         if (serieRadStr) {
             if (seriesRadioNesteArquivo.has(serieRadStr)) {
-                log.avisos.push(`Frota <b>${frota}</b>: Rádio série <b>${serieRadStr}</b> já usado neste arquivo — ignorado.`);
+                log.avisos.push(`Frota <b>${frota}</b>: Rádio <b>${serieRadStr}</b> já usado no arquivo — ignorado.`);
             } else {
                 radioObj = radiosBySerie[serieRadStr];
                 if (!radioObj) {
                     if (!modeloRad) {
-                        log.avisos.push(`Frota <b>${frota}</b>: Rádio <b>${serieRadStr}</b> não cadastrado e <b>Modelo Radio</b> não informado — não criado.`);
+                        log.avisos.push(`Frota <b>${frota}</b>: Rádio <b>${serieRadStr}</b> não cadastrado — modelo não informado, não foi possível criar.`);
                     } else {
                         const newRef = doc(collection(db, colRadios));
-                        radioObj = { id: newRef.id, serie: v('Serie Radio'), modelo: modeloRad, status: 'Disponível', ativo: true, createdAt: new Date().toISOString() };
+                        radioObj = { id: newRef.id, serie: serieRadStr, modelo: modeloRad, status: 'Disponível', ativo: true, createdAt: new Date().toISOString() };
                         pushOp(b => b.set(newRef, radioObj));
                         radiosBySerie[serieRadStr] = radioObj;
                         log.radiosCriados++;
@@ -358,78 +392,79 @@ async function processImportVinculos(rows) {
             }
         }
 
-        // ── FASE 1C: Garantir que os Bordos existem (se informados) ─────────────
-        const criarOuBuscarBordo = (tipo, serieStr, serieOrig, modelo, registroKey) => {
+        const criarOuBuscarBordo = (tipo, serieStr, modelo) => {
             if (!serieStr) return null;
-            let b = bordosByKey[`${tipo.toUpperCase()}||${serieStr}`];
+            const key = `${tipo.toUpperCase()}||${serieStr}`;
+            let b = bordosByKey[key];
             if (!b) {
-                if (!modelo) {
-                    log.avisos.push(`Frota <b>${frota}</b>: ${tipo} série <b>${serieStr}</b> não cadastrado e modelo não informado — não criado.`);
-                    return null;
-                }
                 const newRef = doc(collection(db, colBordos));
-                b = { id: newRef.id, tipo, numeroSerie: serieOrig, modelo, status: 'Disponível', ativo: true, createdAt: new Date().toISOString() };
+                b = { id: newRef.id, tipo, numeroSerie: serieStr, modelo: modelo || '', status: 'Disponível', ativo: true, createdAt: new Date().toISOString() };
                 pushOp(bch => bch.set(newRef, b));
-                bordosByKey[`${tipo.toUpperCase()}||${serieStr}`] = b;
+                bordosByKey[key] = b;
                 log.bordosCriados++;
             }
             return b;
         };
 
-        const temAlgumBordo = serieTelStr || serieMagStr || serieChipStr;
+        const serieTelStr = telaData.serie;
+        const modeloTela  = telaData.modelo;
+        const serieMagStr = magData.serie;
+        const modeloMag   = magData.modelo;
+
+        const temAlgumBordo = serieTelStr || serieMagStr || chipSerie;
         let telaObj = null, magObj = null, chipObj = null;
 
+        const criarOuBuscarChip = (serie) => {
+            if (!serie) return;
+            let b = bordosByKey[`CHIP||${serie}`];
+            if (b) return;
+            const newRef = doc(collection(db, colBordos));
+            b = { id: newRef.id, tipo: 'Chip', numeroSerie: serie, modelo: '', status: 'Disponível', ativo: true, createdAt: new Date().toISOString() };
+            pushOp(bch => bch.set(newRef, b));
+            bordosByKey[`CHIP||${serie}`] = b;
+            log.bordosCriados++;
+        };
+
         if (temAlgumBordo) {
-            if (!serieTelStr || !serieMagStr || !serieChipStr) {
-                log.avisos.push(`Frota <b>${frota}</b>: kit incompleto — Tela, Mag e Chip são obrigatórios juntos para vínculo. Itens informados foram cadastrados como Disponível.`);
-                // Cadastra os que foram informados sem vincular
-                if (serieTelStr)  criarOuBuscarBordo('Tela', serieTelStr,  v('Serie Tela'),  modeloTela,  'Tela');
-                if (serieMagStr)  criarOuBuscarBordo('Mag',  serieMagStr,  v('Serie Mag'),   modeloMag,   'Mag');
-                if (serieChipStr) criarOuBuscarBordo('Chip', serieChipStr, v('Serie Chip'),  modeloChip,  'Chip');
+            if (!serieTelStr || !serieMagStr || !chipSerie) {
+                log.avisos.push(`Frota <b>${frota}</b>: kit incompleto — Tela, Mag e Chip são obrigatórios juntos. Itens foram cadastrados sem vínculo.`);
+                if (serieTelStr) criarOuBuscarBordo('Tela', serieTelStr, modeloTela);
+                if (serieMagStr) criarOuBuscarBordo('Mag',  serieMagStr, modeloMag);
+                if (chipSerie)   criarOuBuscarChip(chipSerie);
             } else {
-                telaObj = criarOuBuscarBordo('Tela', serieTelStr,  v('Serie Tela'),  modeloTela,  'Tela');
-                magObj  = criarOuBuscarBordo('Mag',  serieMagStr,  v('Serie Mag'),   modeloMag,   'Mag');
-                chipObj = criarOuBuscarBordo('Chip', serieChipStr, v('Serie Chip'),  modeloChip,  'Chip');
-                // Se algum não pôde ser criado/encontrado, não vincula o kit
+                telaObj = criarOuBuscarBordo('Tela', serieTelStr, modeloTela);
+                magObj  = criarOuBuscarBordo('Mag',  serieMagStr, modeloMag);
+                chipObj = chipSerie ? (bordosByKey[`CHIP||${chipSerie}`] || null) : null;
+                if (!chipObj && chipSerie) {
+                    const newRef = doc(collection(db, colBordos));
+                    chipObj = { id: newRef.id, tipo: 'Chip', numeroSerie: chipSerie, modelo: '', status: 'Disponível', ativo: true, createdAt: new Date().toISOString() };
+                    pushOp(bch => bch.set(newRef, chipObj));
+                    bordosByKey[`CHIP||${chipSerie}`] = chipObj;
+                    log.bordosCriados++;
+                }
                 if (!telaObj || !magObj || !chipObj) {
                     telaObj = null; magObj = null; chipObj = null;
                 }
             }
         }
 
-        // ── FASE 2: Criar Vínculo (se houver componentes e frota sem vínculo) ───
         const temVinculo = radioObj || telaObj;
-        if (!temVinculo) continue; // só cadastrou equipamento/bordos avulsos — ok, sem vínculo
+        if (!temVinculo) continue;
 
-        if (frotasJaVinculadas.has(equipamento.id)) {
-            log.avisos.push(`Frota <b>${frota}</b>: já possui vínculo ativo — vínculo ignorado.`);
-            continue;
-        }
-
-        // Validar disponibilidade antes de vincular
         let bloqueado = false;
-        if (radioObj && radioObj.status !== 'Disponível') {
-            log.avisos.push(`Frota <b>${frota}</b>: Rádio <b>${serieRadStr}</b> não está Disponível (${radioObj.status}) — vínculo ignorado.`);
-            bloqueado = true;
-        }
-        if (!bloqueado && telaObj && telaObj.status !== 'Disponível') {
-            log.avisos.push(`Frota <b>${frota}</b>: Tela <b>${serieTelStr}</b> não está Disponível — vínculo ignorado.`);
-            bloqueado = true;
-        }
-        if (!bloqueado && magObj && magObj.status !== 'Disponível') {
-            log.avisos.push(`Frota <b>${frota}</b>: Mag <b>${serieMagStr}</b> não está Disponível — vínculo ignorado.`);
-            bloqueado = true;
-        }
-        if (!bloqueado && chipObj && chipObj.status !== 'Disponível') {
-            log.avisos.push(`Frota <b>${frota}</b>: Chip <b>${serieChipStr}</b> não está Disponível — vínculo ignorado.`);
-            bloqueado = true;
+        for (const item of [radioObj, telaObj, magObj, chipObj]) {
+            if (!item || bloqueado) continue;
+            if (item.status !== 'Disponível') {
+                log.avisos.push(`Frota <b>${frota}</b>: ${item.tipo || 'Rádio'} <b>${item.serie || item.numeroSerie}</b> não está Disponível (${item.status}) — vínculo ignorado.`);
+                bloqueado = true;
+            }
         }
         if (bloqueado) continue;
 
-        const codigo = equipamento.codigo || equipamento.frota;
+        const codigoVinc = codigo || equipamento.frota || equipamento.codigo;
         const newRegRef = doc(collection(db, colRegistros));
         pushOp(b => b.set(newRegRef, {
-            equipamentoId: equipamento.id, codigo,
+            equipamentoId: equipamento.id, codigo: codigoVinc,
             radioId: radioObj?.id || null,
             telaId:  telaObj?.id  || null,
             magId:   magObj?.id   || null,
@@ -437,12 +472,12 @@ async function processImportVinculos(rows) {
             createdAt: new Date().toISOString()
         }));
 
-        if (radioObj) pushOp(b => b.update(doc(db, colRadios,  radioObj.id), { status: 'Vinculado' }));
-        if (telaObj)  pushOp(b => b.update(doc(db, colBordos,  telaObj.id),  { status: 'Vinculado' }));
-        if (magObj)   pushOp(b => b.update(doc(db, colBordos,  magObj.id),   { status: 'Vinculado' }));
-        if (chipObj)  pushOp(b => b.update(doc(db, colBordos,  chipObj.id),  { status: 'Vinculado' }));
+        if (radioObj) pushOp(b => b.update(doc(db, colRadios, radioObj.id), { status: 'Vinculado' }));
+        if (telaObj)  pushOp(b => b.update(doc(db, colBordos, telaObj.id),  { status: 'Vinculado' }));
+        if (magObj)   pushOp(b => b.update(doc(db, colBordos, magObj.id),   { status: 'Vinculado' }));
+        if (chipObj)  pushOp(b => b.update(doc(db, colBordos, chipObj.id),  { status: 'Vinculado' }));
 
-        frotasJaVinculadas.add(equipamento.id);
+        equipsJaVinculados.add(equipamento.id);
         log.vinculos++;
     }
 
@@ -459,11 +494,11 @@ async function processImportVinculos(rows) {
         await refreshDataFromFirestore();
 
         const resumo = [
-            log.equipCriados  ? `<b>${log.equipCriados}</b> equipamento(s) cadastrado(s)`   : '',
-            log.radiosCriados ? `<b>${log.radiosCriados}</b> rádio(s) cadastrado(s)`         : '',
-            log.bordosCriados ? `<b>${log.bordosCriados}</b> bordo(s) cadastrado(s)`         : '',
-            log.vinculos      ? `<b>${log.vinculos}</b> vínculo(s) criado(s)`                : '',
-        ].filter(Boolean).join('<br>') || 'Nenhuma alteração realizada.';
+            log.equipCriados  ? `<b>${log.equipCriados}</b> equipamento(s) criado(s)`   : '',
+            log.radiosCriados ? `<b>${log.radiosCriados}</b> rádio(s) criado(s)`         : '',
+            log.bordosCriados ? `<b>${log.bordosCriados}</b> bordo(s) criado(s)`         : '',
+            log.vinculos      ? `<b>${log.vinculos}</b> vínculo(s) criado(s)`            : '',
+        ].filter(Boolean).join('<br>') || 'Nenhuma alteração.';
 
         const avisosHtml = log.avisos.length
             ? `<div class="mt-3 text-xs text-yellow-700 dark:text-yellow-400 max-h-36 overflow-y-auto space-y-0.5 border border-yellow-300 dark:border-yellow-700 rounded p-2 bg-yellow-50 dark:bg-yellow-900/20">
@@ -474,7 +509,7 @@ async function processImportVinculos(rows) {
         showModal('Importação Concluída', `${resumo}${avisosHtml}`, total > 0 ? 'success' : 'warning');
     } catch (error) {
         console.error('Erro ao importar:', error);
-        showModal('Erro', 'Ocorreu um erro ao salvar os dados. Tente novamente.', 'error');
+        showModal('Erro', 'Ocorreu um erro ao salvar os dados.', 'error');
     }
 }
 
@@ -2843,7 +2878,7 @@ function renderDashboard() {
     // --- 5. Helper de Renderização de Card ---
     const _renderStatCard = (title, value, iconClass, colorClass, details = null) => {
         return `
-            <div class="${colorClass} bg-opacity-10 dark:${colorClass} dark:bg-opacity-20 rounded-xl shadow-lg p-4 border border-${colorClass}/20 futuristic-card">
+            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-4 border border-gray-200 dark:border-gray-700 futuristic-card">
                 <div class="flex items-center space-x-3">
                     <div class="p-2 rounded-full ${colorClass} text-white">
                         <i class="fas ${iconClass} fa-lg"></i>
@@ -3956,7 +3991,7 @@ function renderCadastroGeral() {
                         </button>
                         <input type="file" id="geral-import-vinculos-file" accept=".csv,.xlsx,.xls" class="hidden" onchange="handleImportVinculos(event)">
                         <button
-                            onclick="showModal('Instruções — Importar Vínculos em Lote', window.VINCULO_IMPORT_INFO, 'info')"
+                            onclick="showModal('Instruções — Importar Vínculos em Lote', window.VINCULO_IMPORT_INFO, 'info', 'max-w-4xl')"
                             class="flex items-center justify-center gap-1 px-2 py-2 text-sm font-medium rounded-lg text-indigo-600 dark:text-indigo-400 border border-indigo-300 dark:border-indigo-700 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-colors"
                             title="Ver instruções de importação">
                             <i class="fas fa-question-circle"></i>
@@ -3969,10 +4004,10 @@ function renderCadastroGeral() {
                             <tr>
                                 <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Código</th>
                                 <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Frota</th>
-                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Série Rádio</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Série Rádio / Modelo</th>
                                 <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase hidden sm:table-cell">Grupo</th>
-                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase hidden md:table-cell">Tela</th>
-                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase hidden md:table-cell">Mag</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase hidden md:table-cell">Tela / Modelo</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase hidden md:table-cell">Mag / Modelo</th>
                                 <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase hidden md:table-cell">Chip</th>
                                 <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase hidden lg:table-cell">Gestor</th>
                                 <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Ações</th>
@@ -3981,8 +4016,8 @@ function renderCadastroGeral() {
                         <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">${paginatedRegistros.map(reg => {
                             const r = radioMap[reg.radioId] || { id: null, serie: 'N/A', modelo: 'N/A' };
                             const e = equipamentoMap[reg.equipamentoId] || { id: null, frota: 'N/A', grupo: 'N/A', subgrupo: 'N/A', codigo: null, ativo: false };
-                            const t = bordoMap[reg.telaId] || { numeroSerie: 'N/A' };
-                            const m = bordoMap[reg.magId] || { numeroSerie: 'N/A' };
+                            const t = bordoMap[reg.telaId] || { numeroSerie: 'N/A', modelo: 'N/A' };
+                            const m = bordoMap[reg.magId] || { numeroSerie: 'N/A', modelo: 'N/A' };
                             const c = bordoMap[reg.chipId] || { numeroSerie: 'N/A' };
                             
                             const codigo = e.codigo || reg.codigo || 'N/A'; // Prioriza código do equipamento
@@ -4041,10 +4076,10 @@ function renderCadastroGeral() {
                                 <tr class="${rowClass}">
                                     <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 font-mono">${codigo}</td>
                                     <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300">${frotaDisplay}</td>
-                                    <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300">${r.serie !== 'N/A' ? r.serie : '<span class="text-gray-400">--</span>'}</td>
+                                    <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300">${r.serie !== 'N/A' ? `<span class="font-mono">${r.serie}</span>${r.modelo && r.modelo !== 'N/A' ? `<br><span class="text-xs text-gray-400">${r.modelo}</span>` : ''}` : '<span class="text-gray-400">--</span>'}</td>
                                     <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hidden sm:table-cell">${e.grupo || '--'}</td>
-                                    <td class="px-4 py-2 text-xs text-gray-700 dark:text-gray-300 hidden md:table-cell font-mono">${t.numeroSerie && t.numeroSerie !== 'N/A' ? t.numeroSerie : '<span class="text-gray-400">--</span>'}</td>
-                                    <td class="px-4 py-2 text-xs text-gray-700 dark:text-gray-300 hidden md:table-cell font-mono">${m.numeroSerie && m.numeroSerie !== 'N/A' ? m.numeroSerie : '<span class="text-gray-400">--</span>'}</td>
+                                    <td class="px-4 py-2 text-xs text-gray-700 dark:text-gray-300 hidden md:table-cell">${t.numeroSerie && t.numeroSerie !== 'N/A' ? `<span class="font-mono">${t.numeroSerie}</span>${t.modelo && t.modelo !== 'N/A' ? `<br><span class="text-gray-400">${t.modelo}</span>` : ''}` : '<span class="text-gray-400">--</span>'}</td>
+                                    <td class="px-4 py-2 text-xs text-gray-700 dark:text-gray-300 hidden md:table-cell">${m.numeroSerie && m.numeroSerie !== 'N/A' ? `<span class="font-mono">${m.numeroSerie}</span>${m.modelo && m.modelo !== 'N/A' ? `<br><span class="text-gray-400">${m.modelo}</span>` : ''}` : '<span class="text-gray-400">--</span>'}</td>
                                     <td class="px-4 py-2 text-xs text-gray-700 dark:text-gray-300 hidden md:table-cell font-mono">${c.numeroSerie && c.numeroSerie !== 'N/A' ? c.numeroSerie : '<span class="text-gray-400">--</span>'}</td>
                                     <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hidden lg:table-cell">${e.gestor && e.gestor !== 'Sem Gestor' ? e.gestor : '<span class="text-gray-400">--</span>'}</td>
                                     <td class="px-4 py-2 whitespace-nowrap text-sm font-medium">
@@ -5922,71 +5957,18 @@ function renderApp() {
             }
         });
     }
-
-    // Restaura o foco da busca
-    if (focusedSearchInputId) {
-        const focusedInput = document.getElementById(focusedSearchInputId);
-        if (focusedInput) {
-            focusedInput.focus();
-            try { focusedInput.setSelectionRange(searchCursorPosition, searchCursorPosition); } 
-            catch (e) { /* ignora */ }
-        }
-    } else {
-        window._searchTermTemp = '';    
-    }
-}
-
-// Inicialização
-window.onload = initApp;
-
-// --- Funções de Modal e Utilitários (Implementação e Exposição Global) ---
-
-// Funções de Importação (Movemos para o final para garantir que Papa/XLSX estejam carregados)
-function handleImport(collection, event) {
-    const file = event.target.files[0];
-    if (!file) return;
-    event.target.value = '';
-
-    const reader = new FileReader();
-    
-    reader.onload = function(e) {
-        const data = e.target.result;
-        let parsedData = [];
-
-        if (file.name.endsWith('.csv')) {
-            // Papa está disponível globalmente via CDN no index.html
-            Papa.parse(data, {
-                header: true, skipEmptyLines: true,
-                complete: function(results) {
-                    processImportedData(collection, results.data);
-                }
-            });
-        } else if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
-            // XLSX está disponível globalmente via CDN no index.html
-            const workbook = XLSX.read(data, { type: 'binary' });
-            const firstSheetName = workbook.SheetNames[0];
-            const worksheet = workbook.Sheets[firstSheetName];
-            parsedData = XLSX.utils.sheet_to_json(worksheet);
-            processImportedData(collection, parsedData);
-        } else {
-            showModal('Erro', 'Formato de arquivo não suportado. Use CSV ou XLSX.', 'error');
-        }
-    };
-    
-    if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) reader.readAsBinaryString(file);
-    else reader.readAsText(file);
 }
 
 // Funções para Modais
-function showModal(title, message, type = 'info') {
+function showModal(title, message, type = 'info', maxWidth = 'max-w-lg') {
     const modal = document.getElementById('global-modal');
     const titleEl = document.getElementById('modal-title');
     const messageEl = document.getElementById('modal-message');
     const actionsEl = document.getElementById('modal-actions');
 
-    // Volta o tamanho do modal para o padrão
-    modal.querySelector('div').classList.remove('max-w-lg', 'max-w-md', 'max-w-xl');
-    modal.querySelector('div').classList.add('max-w-sm');
+    // Aplica o tamanho do modal
+    modal.querySelector('div').classList.remove('max-w-sm', 'max-w-md', 'max-w-lg', 'max-w-xl', 'max-w-2xl', 'max-w-3xl', 'max-w-4xl', 'max-w-5xl');
+    modal.querySelector('div').classList.add(maxWidth);
 
     titleEl.textContent = title;
     messageEl.innerHTML = message.replace(/\n/g, '<br>');
@@ -6344,6 +6326,10 @@ window.renderPendingApprovalsModal = renderPendingApprovalsModal;
 // Expondo as novas funções do modal de perfil (para uso no formulário)
 window.savePersonalName = savePersonalName;
 window.changePassword = changePassword;
+
+function handleImportVinculos(event) {
+    handleImport('vinculos', event);
+}
 
 // 🌟 CORREÇÃO DE ERROS DE REFERÊNCIA: Expondo as constantes de Tooltip e Tema
 window.RADIO_IMPORT_INFO = RADIO_IMPORT_INFO;

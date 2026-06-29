@@ -300,11 +300,28 @@ async function processImportVinculos(rows) {
         if (opCount >= 490) { batches.push(currentBatch); currentBatch = writeBatch(db); opCount = 0; }
     };
 
+    const totalLinhas = rows.length;
     const log = { equipCriados: 0, radiosCriados: 0, bordosCriados: 0, vinculos: 0, avisos: [] };
     const frotasNesteArquivo = new Set();
     const seriesRadioNesteArquivo = new Set();
 
+    let progressCount = 0;
+    const progressStep = Math.max(1, Math.floor(totalLinhas / 100));
+
+    showProgressModal('Importando Vínculos',
+        `<p class="text-sm text-gray-600 dark:text-gray-300">Processando <strong>${totalLinhas}</strong> linha(s)...</p>`
+    );
+
     for (const row of rows) {
+        progressCount++;
+        if (progressCount % progressStep === 0 || progressCount === totalLinhas) {
+            const pct = Math.round((progressCount / totalLinhas) * 100);
+            updateImportProgress(
+                `<p class="text-sm text-gray-600 dark:text-gray-300">Processando linha <strong>${progressCount}</strong> de <strong>${totalLinhas}</strong>...</p>` +
+                `<p class="text-xs text-gray-400 mt-1">${log.equipCriados} equipamentos · ${log.radiosCriados} rádios · ${log.bordosCriados} bordos · ${log.vinculos} vínculos</p>`,
+                pct
+            );
+        }
         const v = (col) => String(row[col] || '').trim();
         const codigo       = v('Código');
         const frota        = v('Frota').toUpperCase();
@@ -339,7 +356,9 @@ async function processImportVinculos(rows) {
                 continue;
             }
             const newRef = doc(collection(db, colEquip));
+            const generatedCode = !codigo ? generateCode(grupo) : null;
             const newEquip = { id: newRef.id, frota, grupo, modelo: '', subgrupo: '', gestor: gestor || 'Sem Gestor', ativo: true, createdAt: new Date().toISOString() };
+            if (generatedCode) newEquip.codigo = generatedCode;
             pushOp(b => b.set(newRef, newEquip));
             equipsByFrota[frota] = newEquip;
             equipamento = newEquip;
@@ -359,6 +378,14 @@ async function processImportVinculos(rows) {
         if (gestor && equipamento.gestor !== gestor) {
             pushOp(b => b.update(doc(db, colEquip, equipamento.id), { gestor }));
             equipamento.gestor = gestor;
+        }
+
+        if (!codigo && !equipamento.codigo) {
+            const generatedCode = generateCode(equipamento.grupo);
+            if (generatedCode) {
+                equipamento.codigo = generatedCode;
+                pushOp(b => b.update(doc(db, colEquip, equipamento.id), { codigo: generatedCode }));
+            }
         }
 
         const serieRadStr = radioData.serie;
@@ -454,7 +481,7 @@ async function processImportVinculos(rows) {
         }
         if (bloqueado) continue;
 
-        const codigoVinc = codigo || equipamento.frota || equipamento.codigo;
+        const codigoVinc = codigo || equipamento.codigo || equipamento.frota;
         const newRegRef = doc(collection(db, colRegistros));
         pushOp(b => b.set(newRegRef, {
             equipamentoId: equipamento.id, codigo: codigoVinc,
@@ -465,10 +492,10 @@ async function processImportVinculos(rows) {
             createdAt: new Date().toISOString()
         }));
 
-        if (radioObj) pushOp(b => b.update(doc(db, colRadios, radioObj.id), { status: 'Vinculado' }));
-        if (telaObj)  pushOp(b => b.update(doc(db, colBordos, telaObj.id),  { status: 'Vinculado' }));
-        if (magObj)   pushOp(b => b.update(doc(db, colBordos, magObj.id),   { status: 'Vinculado' }));
-        if (chipObj)  pushOp(b => b.update(doc(db, colBordos, chipObj.id),  { status: 'Vinculado' }));
+        if (radioObj) pushOp(b => b.update(doc(db, colRadios, radioObj.id), { status: 'Em Uso' }));
+        if (telaObj)  pushOp(b => b.update(doc(db, colBordos, telaObj.id),  { status: 'Em Uso' }));
+        if (magObj)   pushOp(b => b.update(doc(db, colBordos, magObj.id),   { status: 'Em Uso' }));
+        if (chipObj)  pushOp(b => b.update(doc(db, colBordos, chipObj.id),  { status: 'Em Uso' }));
 
         equipsJaVinculados.add(equipamento.id);
         log.vinculos++;
@@ -483,7 +510,15 @@ async function processImportVinculos(rows) {
     }
 
     try {
-        for (const b of batches) await b.commit();
+        const totalBatches = batches.length;
+        for (let i = 0; i < totalBatches; i++) {
+            const pct = 90 + Math.round(((i + 1) / totalBatches) * 10);
+            updateImportProgress(
+                `<p class="text-sm text-gray-600 dark:text-gray-300">Salvando no banco de dados... (${i + 1}/${totalBatches})</p>`,
+                pct
+            );
+            await batches[i].commit();
+        }
         await refreshDataFromFirestore();
 
         const resumo = [
@@ -661,6 +696,44 @@ async function loadInitialSettings() {
     }
 }
 
+async function saveSettings() {
+    if (!db || !appId) return;
+    try {
+        const settingsDocRef = doc(db, "artifacts", appId, "public", "data", "settings", "config");
+        await setDoc(settingsDocRef, {
+            letterMap: settings.letterMap || {},
+            nextIndex: settings.nextIndex || {},
+            users: settings.users || [],
+        });
+    } catch (e) {
+        console.error("Erro ao salvar settings:", e);
+    }
+}
+
+function showProgressModal(title, message) {
+    const modal = document.getElementById('global-modal');
+    const titleEl = document.getElementById('modal-title');
+    const messageEl = document.getElementById('modal-message');
+    const actionsEl = document.getElementById('modal-actions');
+
+    modal.querySelector('div').classList.remove('max-w-sm', 'max-w-md', 'max-w-lg', 'max-w-xl', 'max-w-2xl', 'max-w-3xl', 'max-w-4xl', 'max-w-5xl');
+    modal.querySelector('div').classList.add('max-w-md');
+
+    titleEl.textContent = title;
+    titleEl.className = 'text-xl font-bold mb-3 text-blue-600 dark:text-blue-400';
+    messageEl.innerHTML = message;
+    actionsEl.innerHTML = '<div class="mt-4 w-full bg-gray-200 rounded-full h-2.5 dark:bg-gray-700"><div id="import-progress-bar" class="bg-green-main h-2.5 rounded-full transition-all duration-300" style="width: 0%"></div></div>';
+
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+}
+
+function updateImportProgress(message, percent) {
+    const msgEl = document.getElementById('modal-message');
+    const barEl = document.getElementById('import-progress-bar');
+    if (msgEl && message !== undefined) msgEl.innerHTML = message;
+    if (barEl) barEl.style.width = Math.min(100, Math.max(0, percent)) + '%';
+}
 
 let firestoreListenersAttached = false;
 let firestoreRefreshInterval = null;
@@ -5912,6 +5985,14 @@ function renderApp() {
 
     root.innerHTML = contentHTML;
 
+    if (focusedSearchInputId) {
+        const el = document.getElementById(focusedSearchInputId);
+        if (el) {
+            el.focus();
+            el.setSelectionRange(searchCursorPosition, searchCursorPosition);
+        }
+    }
+
     // --- Registro do Service Worker ---
     if ('serviceWorker' in navigator) {
         window.addEventListener('load', async () => {
@@ -6361,30 +6442,41 @@ async function processImportVinculosOverwrite(rows) {
     if (!db || !appId) { showModal('Erro', 'Conexão com o banco de dados perdida.', 'error'); return; }
     if (!rows || rows.length === 0) { showModal('Aviso', 'O arquivo está vazio.', 'warning'); return; }
 
+    const totalRows = rows.length;
     const colEquip     = `artifacts/${appId}/public/data/equipamentos`;
     const colRadios    = `artifacts/${appId}/public/data/radios`;
     const colBordos    = `artifacts/${appId}/public/data/bordos`;
     const colRegistros = `artifacts/${appId}/public/data/registros`;
 
-    // --- Apagar tudo em lotes ---
-    const deleteAll = async (colPath) => {
-        const snap = await getDocs(collection(db, colPath));
-        const batches = [];
-        let b = writeBatch(db), count = 0;
-        snap.forEach(d => {
-            b.delete(d.ref); count++;
-            if (count >= 490) { batches.push(b); b = writeBatch(db); count = 0; }
-        });
-        if (count > 0) batches.push(b);
-        for (const batch of batches) await batch.commit();
-    };
+    const colecoes = [
+        { path: colRegistros, label: 'Registros' },
+        { path: colBordos,    label: 'Bordos' },
+        { path: colRadios,    label: 'Rádios' },
+        { path: colEquip,     label: 'Equipamentos' },
+    ];
 
     try {
-        showModal('Aguarde', 'Limpando dados existentes...', 'info');
-        await deleteAll(colRegistros);
-        await deleteAll(colBordos);
-        await deleteAll(colRadios);
-        await deleteAll(colEquip);
+        showProgressModal('Importando Vínculos',
+            `<p class="text-sm text-gray-600 dark:text-gray-300">Preparando importação de <strong>${totalRows}</strong> linha(s)...</p>`
+        );
+
+        for (let c = 0; c < colecoes.length; c++) {
+            const { path: colPath, label } = colecoes[c];
+            const pct = Math.round(((c) / colecoes.length) * 20);
+            updateImportProgress(
+                `<p class="text-sm text-gray-600 dark:text-gray-300">Limpando <strong>${label}</strong> antigos...</p>`,
+                pct
+            );
+            const snap = await getDocs(collection(db, colPath));
+            const batches = [];
+            let b = writeBatch(db), count = 0;
+            snap.forEach(d => {
+                b.delete(d.ref); count++;
+                if (count >= 490) { batches.push(b); b = writeBatch(db); count = 0; }
+            });
+            if (count > 0) batches.push(b);
+            for (const batch of batches) await batch.commit();
+        }
 
         // Limpar estado local antes de reimportar
         dbRegistros = []; dbRadios = []; dbBordos = []; dbEquipamentos = [];

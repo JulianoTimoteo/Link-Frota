@@ -3985,11 +3985,18 @@ function renderCadastroGeral() {
                         <button
                             onclick="document.getElementById('geral-import-vinculos-file').click()"
                             class="flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium rounded-lg text-white bg-indigo-600 hover:bg-indigo-700 shadow-md transition-colors whitespace-nowrap"
-                            title="Importar planilha com vínculos em lote (Frota, Rádio, Tela, Mag, Chip)">
+                            title="Importar planilha com vínculos em lote (Frota, Rádio, Tela, Mag, Chip). A importação SUBSTITUI todos os dados existentes.">
                             <i class="fas fa-file-import"></i>
                             <span>Importar Vínculos</span>
                         </button>
                         <input type="file" id="geral-import-vinculos-file" accept=".csv,.xlsx,.xls" class="hidden" onchange="handleImportVinculos(event)">
+                        <button
+                            onclick="downloadModeloVinculos()"
+                            class="flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium rounded-lg text-white bg-emerald-600 hover:bg-emerald-700 shadow-md transition-colors whitespace-nowrap"
+                            title="Baixar planilha modelo para preenchimento">
+                            <i class="fas fa-file-excel"></i>
+                            <span>Baixar Modelo</span>
+                        </button>
                         <button
                             onclick="showModal('Instruções — Importar Vínculos em Lote', window.VINCULO_IMPORT_INFO, 'info', 'max-w-4xl')"
                             class="flex items-center justify-center gap-1 px-2 py-2 text-sm font-medium rounded-lg text-indigo-600 dark:text-indigo-400 border border-indigo-300 dark:border-indigo-700 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-colors"
@@ -6328,7 +6335,87 @@ window.savePersonalName = savePersonalName;
 window.changePassword = changePassword;
 
 function handleImportVinculos(event) {
-    handleImport('vinculos', event);
+    const file = event.target.files[0];
+    if (!file) return;
+    event.target.value = '';
+
+    showConfirmModal(
+        '⚠ Sobrescrever todos os dados?',
+        `<p class="text-sm text-gray-700 dark:text-gray-300">A importação <strong>apagará todos os registros atuais</strong> de vínculos, rádios, bordos e equipamentos, substituindo-os pelos dados da planilha.</p>
+         <p class="mt-2 text-sm text-red-600 dark:text-red-400 font-semibold">Esta ação não pode ser desfeita. Deseja continuar?</p>`,
+        async () => {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const data = e.target.result;
+                if (file.name.endsWith('.csv')) {
+                    Papa.parse(data, { header: true, skipEmptyLines: true,
+                        complete: function(results) { processImportVinculosOverwrite(results.data); }
+                    });
+                } else if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
+                    const wb = XLSX.read(data, { type: 'binary' });
+                    processImportVinculosOverwrite(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]));
+                } else {
+                    showModal('Erro', 'Formato não suportado. Use CSV ou XLSX.', 'error');
+                }
+            };
+            if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) reader.readAsBinaryString(file);
+            else reader.readAsText(file);
+        }
+    );
+}
+
+async function processImportVinculosOverwrite(rows) {
+    if (!db || !appId) { showModal('Erro', 'Conexão com o banco de dados perdida.', 'error'); return; }
+    if (!rows || rows.length === 0) { showModal('Aviso', 'O arquivo está vazio.', 'warning'); return; }
+
+    const colEquip     = `artifacts/${appId}/public/data/equipamentos`;
+    const colRadios    = `artifacts/${appId}/public/data/radios`;
+    const colBordos    = `artifacts/${appId}/public/data/bordos`;
+    const colRegistros = `artifacts/${appId}/public/data/registros`;
+
+    // --- Apagar tudo em lotes ---
+    const deleteAll = async (colPath) => {
+        const snap = await getDocs(collection(db, colPath));
+        const batches = [];
+        let b = writeBatch(db), count = 0;
+        snap.forEach(d => {
+            b.delete(d.ref); count++;
+            if (count >= 490) { batches.push(b); b = writeBatch(db); count = 0; }
+        });
+        if (count > 0) batches.push(b);
+        for (const batch of batches) await batch.commit();
+    };
+
+    try {
+        showModal('Aguarde', 'Limpando dados existentes...', 'info');
+        await deleteAll(colRegistros);
+        await deleteAll(colBordos);
+        await deleteAll(colRadios);
+        await deleteAll(colEquip);
+
+        // Limpar estado local antes de reimportar
+        dbRegistros = []; dbRadios = []; dbBordos = []; dbEquipamentos = [];
+
+        await processImportVinculos(rows);
+    } catch (err) {
+        console.error('Erro ao sobrescrever dados:', err);
+        showModal('Erro', 'Falha ao limpar os dados existentes. Tente novamente.', 'error');
+    }
+}
+
+function downloadModeloVinculos() {
+    const headers = ['Código', 'Frota', 'Série Rádio / Modelo', 'Grupo', 'Tela / Modelo', 'Mag / Modelo', 'Chip', 'Gestor'];
+    const exemplo = [
+        'COD-001', '8001', 'SN12345/EM200', 'Colheita', 'T-001/TELA X', 'M-001/MAG Y', 'CHIP-001', 'João Silva'
+    ];
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet([headers, exemplo]);
+
+    // Largura de colunas
+    ws['!cols'] = headers.map((h, i) => ({ wch: [12, 10, 22, 14, 18, 18, 14, 16][i] }));
+
+    XLSX.utils.book_append_sheet(wb, ws, 'Vínculos');
+    XLSX.writeFile(wb, 'modelo_vinculos.xlsx');
 }
 
 // 🌟 CORREÇÃO DE ERROS DE REFERÊNCIA: Expondo as constantes de Tooltip e Tema
@@ -6337,6 +6424,7 @@ window.EQUIPAMENTO_IMPORT_INFO = EQUIPAMENTO_IMPORT_INFO;
 window.BORDO_IMPORT_INFO = BORDO_IMPORT_INFO; // 🌟 NOVO: Expondo constante de Bordo
 window.VINCULO_IMPORT_INFO = VINCULO_IMPORT_INFO;
 window.handleImportVinculos = handleImportVinculos;
+window.downloadModeloVinculos = downloadModeloVinculos;
 window.toggleTheme = toggleTheme;
 
 

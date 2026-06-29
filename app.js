@@ -210,10 +210,10 @@ const BORDO_IMPORT_INFO = `
 
 const VINCULO_IMPORT_INFO = `
     <p class="text-sm text-gray-600 dark:text-gray-300 mb-2">
-        <strong>Colunas:</strong> Código, Frota, Série Rádio / Modelo, Grupo, Tela / Modelo, Mag / Modelo, Chip, Gestor.
+        <strong>Colunas:</strong> Código, Frota, Série Rádio, Modelo Rádio, Grupo, Tela, Modelo Tela, Mag, Modelo Mag, Chip, Gestor.
     </p>
     <p class="text-sm text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/30 p-2 rounded border border-amber-300 dark:border-amber-700">
-        ⚠ Itens existentes são reutilizados. Tela+Mag+Chip juntos ou nenhum. Frota opcional. Equipamentos já vinculados são ignorados. "Série / Modelo" separados por "/".
+        ⚠ Cada componente tem sua própria coluna de Série e Modelo. Tela+Mag+Chip devem vir juntos ou nenhum. Use o botão <strong>"Baixar Modelo"</strong> para obter a planilha no formato correto.
     </p>
 `;
 
@@ -304,13 +304,6 @@ async function processImportVinculos(rows) {
     const frotasNesteArquivo = new Set();
     const seriesRadioNesteArquivo = new Set();
 
-    const parseSerieModelo = (val) => {
-        if (!val) return { serie: '', modelo: '' };
-        const idx = val.indexOf('/');
-        if (idx === -1) return { serie: val.trim().toUpperCase(), modelo: '' };
-        return { serie: val.slice(0, idx).trim().toUpperCase(), modelo: val.slice(idx + 1).trim() };
-    };
-
     for (const row of rows) {
         const v = (col) => String(row[col] || '').trim();
         const codigo       = v('Código');
@@ -318,9 +311,9 @@ async function processImportVinculos(rows) {
         const grupo        = v('Grupo');
         const gestor       = v('Gestor');
 
-        const radioData    = parseSerieModelo(v('Série Rádio / Modelo'));
-        const telaData     = parseSerieModelo(v('Tela / Modelo'));
-        const magData      = parseSerieModelo(v('Mag / Modelo'));
+        const radioData    = { serie: v('Série Rádio').toUpperCase(), modelo: v('Modelo Rádio') };
+        const telaData     = { serie: v('Tela').toUpperCase(),        modelo: v('Modelo Tela') };
+        const magData      = { serie: v('Mag').toUpperCase(),         modelo: v('Modelo Mag') };
         const chipSerie    = v('Chip').toUpperCase();
 
         if (!frota && !radioData.serie && !telaData.serie && !magData.serie && !chipSerie) {
@@ -6404,16 +6397,13 @@ async function processImportVinculosOverwrite(rows) {
 }
 
 function downloadModeloVinculos() {
-    const headers = ['Código', 'Frota', 'Série Rádio / Modelo', 'Grupo', 'Tela / Modelo', 'Mag / Modelo', 'Chip', 'Gestor'];
+    const headers = ['Código', 'Frota', 'Série Rádio', 'Modelo Rádio', 'Grupo', 'Tela', 'Modelo Tela', 'Mag', 'Modelo Mag', 'Chip', 'Gestor'];
     const exemplo = [
-        'COD-001', '8001', 'SN12345/EM200', 'Colheita', 'T-001/TELA X', 'M-001/MAG Y', 'CHIP-001', 'João Silva'
+        'COD-001', '8001', 'SN12345', 'EM200', 'Colheita', 'T-001', 'TELA X', 'M-001', 'MAG Y', 'CHIP-001', 'João Silva'
     ];
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.aoa_to_sheet([headers, exemplo]);
-
-    // Largura de colunas
-    ws['!cols'] = headers.map((h, i) => ({ wch: [12, 10, 22, 14, 18, 18, 14, 16][i] }));
-
+    ws['!cols'] = [12, 10, 14, 12, 14, 12, 12, 12, 12, 14, 16].map(w => ({ wch: w }));
     XLSX.utils.book_append_sheet(wb, ws, 'Vínculos');
     XLSX.writeFile(wb, 'modelo_vinculos.xlsx');
 }

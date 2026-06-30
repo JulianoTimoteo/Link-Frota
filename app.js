@@ -1593,7 +1593,7 @@ async function handleVincularSubmit(equipamentoId, tipo, existingReg) {
     if (magIdNew)  itensParaVerificar.push({ id: magIdNew,  type: 'Mag' });
     if (chipIdNew) itensParaVerificar.push({ id: chipIdNew, type: 'Chip' });
   }
-  for (const item of itensParaVerificar) {
+    for (const item of itensParaVerificar) {
     const isReplacingCurrentItem =
       (item.type === 'Rádio' && item.id === radioIdExisting) ||
       (item.type === 'Tela'  && item.id === telaIdExisting) ||
@@ -1608,6 +1608,13 @@ async function handleVincularSubmit(equipamentoId, tipo, existingReg) {
     if (isLinkedElsewhere) {
       const itemDetails = dbRadios.find(r => r.id === item.id) || dbBordos.find(b => b.id === item.id);
       showModal('Item Já Vinculado', `${item.type} ${itemDetails?.serie || itemDetails?.numeroSerie || item.id} já está em uso em outra Frota. Desvincule-o primeiro.`, 'error');
+      return;
+    }
+
+    // Validação de Sinistro: itens com status diferente de "Disponível" não podem ser vinculados
+    const itemDetails = dbRadios.find(r => r.id === item.id) || dbBordos.find(b => b.id === item.id);
+    if (itemDetails && itemDetails.status !== 'Disponível') {
+      showModal('Item Indisponível', `${item.type} ${itemDetails?.serie || itemDetails?.numeroSerie || item.id} está com status "${itemDetails.status}" e não pode ser vinculado. Altere para "Disponível" primeiro.`, 'error');
       return;
     }
   }
@@ -3217,7 +3224,8 @@ function renderCadastroRadio() {
     // Filtra por termo de busca em todos os rádios (ativos e inativos)
     const filteredRadios = dbRadios.filter(r =>	
         (r.serie || '').toLowerCase().includes(radioSearch) ||	
-        (r.modelo || '').toLowerCase().includes(radioSearch)
+        (r.modelo || '').toLowerCase().includes(radioSearch) ||
+        (r.status || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').includes(radioSearch)
     );
 
     // Ordena: Ativos primeiro, Inativos por último. Dentro de cada grupo, ordena por série.
@@ -3392,7 +3400,9 @@ function renderCadastroEquipamento() {
         (e.frota || '').toLowerCase().includes(equipamentoSearch) ||
         (e.grupo || '').toLowerCase().includes(equipamentoSearch) ||
         (e.modelo || '').toLowerCase().includes(equipamentoSearch) ||
-        (e.subgrupo || '').toLowerCase().includes(equipamentoSearch)
+        (e.subgrupo || '').toLowerCase().includes(equipamentoSearch) ||
+        (e.codigo || '').toLowerCase().includes(equipamentoSearch) ||
+        (e.gestor || '').toLowerCase().includes(equipamentoSearch)
     );
 
     // Ordena: Ativos primeiro, Inativos por último. Dentro de cada grupo, ordena por frota.
@@ -3618,7 +3628,8 @@ function renderCadastroBordos() {
     const filteredBordos = dbBordos.filter(b =>	
         (b.numeroSerie || '').toLowerCase().includes(bordosSearch) ||
         (b.modelo || '').toLowerCase().includes(bordosSearch) ||
-        (b.tipo || '').toLowerCase().includes(bordosSearch)
+        (b.tipo || '').toLowerCase().includes(bordosSearch) ||
+        (b.status || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').includes(bordosSearch)
     );
 
     // FIX para o erro: Uncaught TypeError: Cannot read properties of undefined (reading 'localeCompare')
@@ -3866,16 +3877,21 @@ function renderCadastroGeral() {
     const filteredRegistros = dbRegistros.filter(reg => {
         const r = radioMap[reg.radioId] || {};
         const e = equipamentoMap[reg.equipamentoId] || {};
+        const t = bordoMap[reg.telaId] || {};
+        const m = bordoMap[reg.magId] || {};
+        const c = bordoMap[reg.chipId] || {};
         const search = geralSearch.toLowerCase();
         
-        // CORREÇÃO: Deve incluir frotas inativas no resultado da pesquisa para que o usuário possa gerenciá-las
-        // if (e.ativo === false) return false; 
-        
         return (
-            (e.codigo || reg.codigo || '').toLowerCase().includes(search) || // Busca pelo código do equipamento
+            (e.codigo || reg.codigo || '').toLowerCase().includes(search) ||
             (r.serie || '').toLowerCase().includes(search) ||
+            (r.modelo || '').toLowerCase().includes(search) ||
             (e.frota || '').toLowerCase().includes(search) ||
-            (e.grupo || '').toLowerCase().includes(search)
+            (e.grupo || '').toLowerCase().includes(search) ||
+            (e.gestor || '').toLowerCase().includes(search) ||
+            (t.numeroSerie || '').toLowerCase().includes(search) ||
+            (m.numeroSerie || '').toLowerCase().includes(search) ||
+            (c.numeroSerie || '').toLowerCase().includes(search)
         );
     });
 
@@ -5478,6 +5494,12 @@ function attachCadastroGeralEvents() {
                      const item = isRadio ? dbRadios.find(r => r.id === itemId) : dbBordos.find(b => b.id === itemId);
                      const itemType = isRadio ? 'Rádio' : item.tipo;
                      showModal('Item Já Vinculado', `${itemType} ${item.serie || item.numeroSerie} já está em uso em outra Frota. Desvincule-o primeiro.`, 'error');
+                     return;
+                 }
+                 // Validação de Sinistro: itens com status diferente de "Disponível" não podem ser vinculados
+                 if (item && item.status !== 'Disponível') {
+                     const itemType = isRadio ? 'Rádio' : (item.tipo || 'Item');
+                     showModal('Item Indisponível', `${itemType} ${item.serie || item.numeroSerie} está com status "${item.status}" e não pode ser vinculado. Altere para "Disponível" primeiro.`, 'error');
                      return;
                  }
             }

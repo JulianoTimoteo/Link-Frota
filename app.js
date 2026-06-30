@@ -356,9 +356,9 @@ async function processImportVinculos(rows) {
                 continue;
             }
             const newRef = doc(collection(db, colEquip));
-            const generatedCode = !codigo ? generateCode(grupo) : null;
+            const equipCode = codigo || generateCode(grupo);
             const newEquip = { id: newRef.id, frota, grupo, modelo: '', subgrupo: '', gestor: gestor || 'Sem Gestor', ativo: true, createdAt: new Date().toISOString() };
-            if (generatedCode) newEquip.codigo = generatedCode;
+            if (equipCode) newEquip.codigo = equipCode;
             pushOp(b => b.set(newRef, newEquip));
             equipsByFrota[frota] = newEquip;
             equipamento = newEquip;
@@ -380,11 +380,11 @@ async function processImportVinculos(rows) {
             equipamento.gestor = gestor;
         }
 
-        if (!codigo && !equipamento.codigo) {
-            const generatedCode = generateCode(equipamento.grupo);
-            if (generatedCode) {
-                equipamento.codigo = generatedCode;
-                pushOp(b => b.update(doc(db, colEquip, equipamento.id), { codigo: generatedCode }));
+        if (!equipamento.codigo) {
+            const codeToSet = codigo || generateCode(equipamento.grupo);
+            if (codeToSet) {
+                equipamento.codigo = codeToSet;
+                pushOp(b => b.update(doc(db, colEquip, equipamento.id), { codigo: codeToSet }));
             }
         }
 
@@ -1209,10 +1209,10 @@ async function deleteLink(regId, type) {
             
             // Se houver bordos vinculados, apenas nullifica o radio/equipamento e o código
             if (registroAtual.telaId || registroAtual.magId || registroAtual.chipId) {
-                // Atualiza o registro, removendo apenas as referências ao rádio
+                // Atualiza o registro, removendo apenas as referências ao rádio.
+                // O código NUNCA é removido — é permanente e acompanha o equipamento para sempre.
                 batch.update(regRef, {
-                    radioId: null,
-                    codigo: null // Remove o código, pois ele estava atrelado ao registro Rádio-Frota inicial
+                    radioId: null
                 });
                 successMessage = 'Rádio desvinculado com sucesso! Os Bordos permanecem vinculados à Frota.';
             } else {

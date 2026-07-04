@@ -251,13 +251,16 @@ async function processGenericImport(type, rows) {
             await processImportVinculos(rows);
             updateState();
             return;
+        } else if (type === 'equipamentos') {
+            // 🌟 CORREÇÃO: import de Equipamentos tem regras próprias (atualiza por Frota,
+            // sem mexer em rádio/bordo/vínculo) — ver processImportEquipamentos().
+            await processImportEquipamentos(rows);
+            updateState();
+            return;
         } else {
             for (const row of rows) {
                 if (type === 'radios') {
                     await saveRadio({...row});
-                    count++;
-                } else if (type === 'equipamentos') {
-                    await saveEquipamento({...row});
                     count++;
                 } else if (type === 'bordos') {
                     await saveBordo({...row});
@@ -270,6 +273,154 @@ async function processGenericImport(type, rows) {
     } catch (error) {
         console.error('Erro na importação:', error);
         showModal('Erro', 'Ocorreu um erro ao processar a importação.', 'error');
+    }
+}
+
+/**
+ * 🌟 CORREÇÃO: Importação de Equipamentos por planilha (CSV/XLSX).
+ *
+ * Antes desta correção, o import chamava `saveEquipamento(...)`, uma função que
+ * NUNCA existiu no projeto — todo import de Equipamentos falhava silenciosamente
+ * (ReferenceError capturado pelo try/catch do handleImport, sem gravar nada).
+ *
+ * REGRAS DE NEGÓCIO (conforme solicitado):
+ *  - O casamento de cada linha é feito pela coluna "Frota" (chave única).
+ *  - Se a Frota já existir no cadastro: atualiza SOMENTE Grupo, Modelo do
+ *    Equipamento e Subgrupo (e Gestor, se essa coluna vier preenchida na
+ *    planilha). Nenhum outro campo é tocado — o merge é parcial (Firestore
+ *    setDoc com { merge: true }), então o `id` do equipamento, o `ativo`,
+ *    o `createdAt`, e principalmente os dados de Rádio (série/modelo),
+ *    Bordo e o "código" de vínculo da Frota (que vivem nas coleções
+ *    `radios`, `bordos` e `registros`, totalmente separadas) permanecem
+ *    intocados.
+ *  - Colunas ausentes ou em branco na planilha NÃO apagam o valor já
+ *    cadastrado (célula vazia = "não mexer nesse campo").
+ *  - Se a Frota não existir, um novo equipamento é criado — nesse caso
+ *    Grupo, Modelo e Subgrupo são obrigatórios.
+ *  - Linhas sem "Frota" preenchida são ignoradas.
+ */
+async function processImportEquipamentos(rows) {
+    if (!db || !appId) { showModal('Erro', 'Conexão com o banco de dados perdida.', 'error'); return; }
+    if (!rows || rows.length === 0) { showModal('Aviso', 'O arquivo está vazio.', 'warning'); return; }
+
+    // Aceita nomes de coluna com pequenas variações (maiúsculas/minúsculas, "Modelo" vs "Modelo do Equipamento")
+    const getVal = (row, ...keys) => {
+        for (const k of keys) {
+            if (row[k] !== undefined && row[k] !== null && String(row[k]).trim() !== '') {
+                return String(row[k]).trim();
+            }
+        }
+        return '';
+    };
+
+    const colPath = `artifacts/${appId}/public/data/equipamentos`;
+    const totalRows = rows.length;
+
+    showProgressModal('Importando Equipamentos',
+        `<p class="text-sm text-gray-600 dark:text-gray-300">Processando <strong>${totalRows}</strong> linha(s)...</p>`
+    );
+
+    let batch = writeBatch(db);
+    let opsInBatch = 0;
+    const batches = [];
+    let updated = 0, created = 0, skipped = 0;
+    const avisos = [];
+
+    for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        const frota = getVal(row, 'Frota', 'frota');
+
+        if (!frota) { skipped++; continue; }
+
+        const grupoRaw = getVal(row, 'Grupo', 'grupo');
+        const modelo   = getVal(row, 'Modelo do Equipamento', 'Modelo', 'modelo');
+        const subgrupo = getVal(row, 'Subgrupo', 'subgrupo');
+        const gestor   = getVal(row, 'Gestor', 'gestor');
+
+        // Só entram no objeto de atualização os campos que realmente vieram na planilha
+        const updates = {};
+        if (grupoRaw) {
+            const grupoMatch = GROUPS.find(g => g.toLowerCase() === grupoRaw.toLowerCase());
+            if (grupoMatch) {
+                updates.grupo = grupoMatch;
+            } else {
+                avisos.push(`Frota ${frota}: Grupo "${grupoRaw}" inválido (não alterado). Use um de: ${GROUPS.join(', ')}.`);
+            }
+        }
+        if (modelo)   updates.modelo = modelo;
+        if (subgrupo) updates.subgrupo = subgrupo;
+        if (gestor)   updates.gestor = gestor;
+
+        const existing = dbEquipamentos.find(eq => String(eq.frota || '').trim() === frota);
+
+        if (existing) {
+            // ATUALIZA em cima do equipamento já existente — nunca cria um novo id,
+            // nunca mexe em rádio/bordo/registro de vínculo (outras coleções).
+            if (Object.keys(updates).length > 0) {
+                const docRef = doc(db, colPath, existing.id);
+                batch.set(docRef, updates, { merge: true });
+                opsInBatch++;
+                updated++;
+            } else {
+                skipped++;
+            }
+        } else {
+            // CRIA um equipamento novo — exige os 3 campos obrigatórios
+            if (!updates.grupo || !updates.modelo || !updates.subgrupo) {
+                avisos.push(`Frota ${frota}: não encontrada no cadastro e faltam dados obrigatórios (Grupo/Modelo/Subgrupo) para criá-la — linha ignorada.`);
+                skipped++;
+                continue;
+            }
+            const newRef = doc(collection(db, colPath));
+            batch.set(newRef, {
+                frota,
+                grupo: updates.grupo,
+                modelo: updates.modelo,
+                subgrupo: updates.subgrupo,
+                gestor: updates.gestor || 'Sem Gestor',
+                ativo: true,
+                createdAt: new Date().toISOString()
+            });
+            opsInBatch++;
+            created++;
+        }
+
+        if (opsInBatch >= 450) {
+            batches.push(batch);
+            batch = writeBatch(db);
+            opsInBatch = 0;
+        }
+
+        if (i % 25 === 0) {
+            updateImportProgress(
+                `<p class="text-sm text-gray-600 dark:text-gray-300">Processando linha <strong>${i + 1}</strong> de <strong>${totalRows}</strong>...</p>`,
+                Math.round((i / totalRows) * 90)
+            );
+        }
+    }
+    if (opsInBatch > 0) batches.push(batch);
+
+    try {
+        for (let b = 0; b < batches.length; b++) {
+            updateImportProgress(
+                `<p class="text-sm text-gray-600 dark:text-gray-300">Gravando alterações (lote ${b + 1}/${batches.length})...</p>`,
+                90 + Math.round(((b + 1) / batches.length) * 10)
+            );
+            await batches[b].commit();
+        }
+
+        await refreshDataFromFirestore();
+
+        let msg = `<p><strong>${updated}</strong> equipamento(s) atualizado(s) e <strong>${created}</strong> criado(s).</p>`;
+        if (skipped > 0) msg += `<p class="mt-1">${skipped} linha(s) ignorada(s) (sem Frota preenchida ou dados insuficientes).</p>`;
+        if (avisos.length > 0) {
+            msg += `<p class="mt-2 text-amber-600 font-semibold">Avisos:</p><ul class="list-disc list-inside text-sm mt-1">${avisos.slice(0, 15).map(a => `<li>${a}</li>`).join('')}</ul>`;
+            if (avisos.length > 15) msg += `<p class="text-xs mt-1">(+${avisos.length - 15} outro(s) aviso(s))</p>`;
+        }
+        showModal(avisos.length > 0 ? 'Importação concluída com avisos' : 'Sucesso', msg, avisos.length > 0 ? 'warning' : 'success');
+    } catch (err) {
+        console.error('Erro ao importar equipamentos:', err);
+        showModal('Erro', 'Falha ao gravar os equipamentos importados no banco de dados. Tente novamente.', 'error');
     }
 }
     

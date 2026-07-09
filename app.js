@@ -949,6 +949,13 @@ async function refreshDataFromFirestore() {
 
         await Promise.all(fetchPromises);
 
+        // 🌟 CORREÇÃO: A verificação de duplicidades precisa rodar toda vez que os
+        // dados são atualizados (carga inicial, após salvar, após importar, a cada
+        // refresh automático de 2h). Antes, `checkDuplicities()` só era chamada
+        // dentro de `deleteDuplicity()`, ou seja, nunca era executada no fluxo normal
+        // e o sino de integridade ficava sempre "verde" mesmo havendo duplicatas reais.
+        checkDuplicities();
+
         saveDataCache();
         await saveDataCacheFile();
 
@@ -1424,6 +1431,67 @@ async function deleteLink(regId, type) {
 
 
 /**
+ * 🌟 CORREÇÃO: Desvinculação automática ao marcar item como "Sinistro".
+ *
+ * Regra de negócio: "Sinistro" significa que o item foi perdido/queimado/roubado
+ * e não pode mais permanecer fisicamente vinculado a uma Frota. Antes desta
+ * correção, o formulário de edição BLOQUEAVA a troca de status de um item
+ * "Em Uso" para qualquer outro valor (revertendo silenciosamente para "Em Uso"
+ * de volta e pedindo para desvincular manualmente na aba "Geral"). Isso incluía
+ * o caso de Sinistro, deixando o item preso ao equipamento mesmo estando
+ * inutilizável.
+ *
+ * Esta função localiza o registro de vínculo (`registros`) que referencia o
+ * item (rádio ou bordo) e remove apenas a referência a ESSE item específico.
+ * Se, após a remoção, o registro não referenciar mais nenhum item (rádio nem
+ * bordos), o registro de associação é removido por completo (frota liberada).
+ *
+ * @param {'radios'|'bordos'} collectionName Coleção do item marcado como Sinistro.
+ * @param {string} itemId ID do documento do rádio ou bordo.
+ */
+async function autoUnlinkOnSinistro(collectionName, itemId) {
+    if (!db || !appId) return;
+
+    let registro = null;
+    if (collectionName === 'radios') {
+        registro = dbRegistros.find(reg => reg.radioId === itemId);
+    } else if (collectionName === 'bordos') {
+        registro = dbRegistros.find(reg =>
+            reg.telaId === itemId || reg.magId === itemId || reg.chipId === itemId
+        );
+    }
+
+    // Item não está vinculado a nenhuma Frota — nada a fazer.
+    if (!registro) return;
+
+    const regRef = doc(db, `artifacts/${appId}/public/data/registros`, registro.id);
+    const updates = {};
+
+    if (collectionName === 'radios') {
+        updates.radioId = null;
+    } else {
+        if (registro.telaId === itemId) updates.telaId = null;
+        if (registro.magId === itemId) updates.magId = null;
+        if (registro.chipId === itemId) updates.chipId = null;
+    }
+
+    // Estado resultante do registro após remover apenas a referência ao item em Sinistro
+    const resultante = { ...registro, ...updates };
+    const semNadaVinculado = !resultante.radioId && !resultante.telaId && !resultante.magId && !resultante.chipId;
+
+    try {
+        if (semNadaVinculado) {
+            await deleteDoc(regRef);
+        } else {
+            await updateDoc(regRef, updates);
+        }
+    } catch (error) {
+        console.error('Erro ao desvincular automaticamente item em Sinistro:', error);
+        showModal('Erro', 'O item foi salvo como Sinistro, mas houve uma falha ao desvincular automaticamente da Frota. Verifique e desvincule manualmente na aba "Geral".', 'error');
+    }
+}
+
+/**
  * @NOVA IMPLEMENTAÇÃO: Abre modal para vincular Rádio ou Bordos à Frota
  * * [CORREÇÃO APLICADA]: Adicionado scroll interno para corrigir visualização mobile.
  * * @param {string} equipamentoId ID da Frota a ser vinculada.
@@ -1472,14 +1540,20 @@ function showVincularModal(equipamentoId, tipo) {
         .map(r => `<option value="${r.id}">${r.serie} (${r.modelo})</option>`)
         .join('');
     
-    // Função para gerar options de substituição/vínculo
+    // 🌟 CORREÇÃO: Antes, a opção "Manter Atual / Desvincular" era um ÚNICO item de
+    // menu que, na prática, sempre se comportava como "manter" — nunca desvinculava
+    // de verdade (o handler só processava a troca quando um item concreto era
+    // escolhido). Isso impedia liberar um item (ex: para poder marcá-lo como
+    // Sinistro depois) sem escolher um substituto na hora. Agora são duas opções
+    // reais e distintas: __KEEP__ (não mexe em nada) e __UNLINK__ (desvincula de
+    // fato, sem exigir substituto).
     const getBordoOptions = (tipo) => {
         const linkedItem = linkedBordos[tipo];
         let options = '';
         
-        // 1. Opção padrão: Selecione/Manter
         if (linkedItem) {
-            options += `<option value="" selected>Manter ${tipo} Atual / Desvincular</option>`;
+            options += `<option value="__KEEP__" selected>Manter ${tipo} Atual (não alterar)</option>`;
+            options += `<option value="__UNLINK__">🔓 Desvincular ${tipo} (sem substituir)</option>`;
         } else {
              options += `<option value="" selected>Selecione o ${tipo}</option>`;
         }
@@ -1504,13 +1578,17 @@ function showVincularModal(equipamentoId, tipo) {
         } else {
             const currentRadioDisplay = linkedRadio ? linkedRadio.serie + ' (' + linkedRadio.modelo + ')' : 'NENHUM RÁDIO VINCULADO';
             
-            infoHtml = `<p class="text-gray-700 dark:text-gray-300"><b>Rádio Atual:</b> ${currentRadioDisplay}</p><p class="mt-2 text-sm text-yellow-600 dark:text-yellow-400">Selecione um Rádio abaixo para VINCULAR, SUBSTITUIR ou para **desvincular** (selecione a primeira opção).</p>`;
+            infoHtml = `<p class="text-gray-700 dark:text-gray-300"><b>Rádio Atual:</b> ${currentRadioDisplay}</p><p class="mt-2 text-sm text-yellow-600 dark:text-yellow-400">Selecione um Rádio abaixo para VINCULAR, SUBSTITUIR ou escolha "Desvincular" para liberar sem colocar outro no lugar.</p>`;
             
             formHtml = `
                 <div>
                     <label for="modal-radio-id" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Rádio (Seleção/Substituição)</label>
                     <select id="modal-radio-id" class="tom-select-radio-modal mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-green-main focus:ring-green-main p-2 border bg-white dark:bg-gray-700 dark:text-gray-100">
-                        <option value="">${linkedRadio ? 'Manter Rádio Atual / Desvincular' : 'Selecione o Rádio para vincular...'}</option>
+                        ${linkedRadio
+                            ? `<option value="__KEEP__" selected>Manter Rádio Atual (não alterar)</option>
+                               <option value="__UNLINK__">🔓 Desvincular Rádio (sem substituir)</option>`
+                            : `<option value="">Selecione o Rádio para vincular...</option>`
+                        }
                         ${radioOptions}
                     </select>
                 </div>
@@ -1534,7 +1612,7 @@ function showVincularModal(equipamentoId, tipo) {
                                 class="tom-select-bordo-modal mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-green-main focus:ring-green-main p-2 border bg-white dark:bg-gray-700 dark:text-gray-100">
                             ${getBordoOptions(tipo)}
                         </select>
-                         <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Selecione a primeira opção para desvincular, ou um item para vincular/substituir.</p>
+                         <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Escolha "Desvincular" para liberar o item sem colocar outro no lugar, ou selecione um item para vincular/substituir.</p>
                     </div>
                 </div>
             `;
@@ -1689,10 +1767,25 @@ async function handleVincularSubmit(equipamentoId, tipo, existingReg) {
   const magSelect   = document.getElementById('modal-mag-id');
   const chipSelect  = document.getElementById('modal-chip-id');
 
-  const radioIdNew = radioSelect ? (radioSelect.value || null) : null;
-  const telaIdNew  = telaSelect  ? (telaSelect.value  || null) : null;
-  const magIdNew   = magSelect   ? (magSelect.value   || null) : null;
-  const chipIdNew  = chipSelect  ? (chipSelect.value  || null) : null;
+  // 🌟 CORREÇÃO: antes, o valor "" do select era usado tanto para "não fiz nada,
+  // mantenha como está" quanto teria que representar "desvincular sem substituir",
+  // e isso nunca funcionava (ver comentário em getBordoOptions). Agora os selects
+  // emitem sentinelas explícitas: '__KEEP__' (não mexe em nada) e '__UNLINK__'
+  // (desvincula de fato, sem exigir um item substituto).
+  const NOCHANGE = '__NOCHANGE__';
+  const interpretSelectValue = (select, existingId) => {
+    if (!select) return NOCHANGE;
+    const val = select.value;
+    if (val === '__KEEP__') return NOCHANGE;
+    if (val === '__UNLINK__') return null; // desvincular de verdade, sem substituto
+    if (val === '') return existingId ? NOCHANGE : null; // fallback: nenhum item vinculado e nada escolhido
+    return val; // um item real foi escolhido (vínculo novo ou substituição)
+  };
+
+  const radioIdNew = interpretSelectValue(radioSelect, null);
+  const telaIdNew  = interpretSelectValue(telaSelect, null);
+  const magIdNew   = interpretSelectValue(magSelect, null);
+  const chipIdNew  = interpretSelectValue(chipSelect, null);
 
   // valores existentes (se houver)
   const radioIdExisting = existingReg ? existingReg.radioId : null;
@@ -1738,11 +1831,11 @@ async function handleVincularSubmit(equipamentoId, tipo, existingReg) {
 
   // --- verifica se novos itens já estão vinculados em outras frotas ---
   const itensParaVerificar = [];
-  if (tipo === 'radio' && radioIdNew) itensParaVerificar.push({ id: radioIdNew, type: 'Rádio' });
+  if (tipo === 'radio' && radioIdNew && radioIdNew !== NOCHANGE) itensParaVerificar.push({ id: radioIdNew, type: 'Rádio' });
   if (tipo === 'bordos') {
-    if (telaIdNew) itensParaVerificar.push({ id: telaIdNew, type: 'Tela' });
-    if (magIdNew)  itensParaVerificar.push({ id: magIdNew,  type: 'Mag' });
-    if (chipIdNew) itensParaVerificar.push({ id: chipIdNew, type: 'Chip' });
+    if (telaIdNew && telaIdNew !== NOCHANGE) itensParaVerificar.push({ id: telaIdNew, type: 'Tela' });
+    if (magIdNew  && magIdNew  !== NOCHANGE) itensParaVerificar.push({ id: magIdNew,  type: 'Mag' });
+    if (chipIdNew && chipIdNew !== NOCHANGE) itensParaVerificar.push({ id: chipIdNew, type: 'Chip' });
   }
     for (const item of itensParaVerificar) {
     const isReplacingCurrentItem =
@@ -1792,9 +1885,9 @@ async function handleVincularSubmit(equipamentoId, tipo, existingReg) {
 
   if (tipo === 'radio') {
     // Só aplicar mudanças no rádio
-    if (radioIdNew !== null && radioIdNew !== radioIdExisting) {
+    if (radioIdNew !== NOCHANGE && radioIdNew !== radioIdExisting) {
       if (radioIdExisting) itemsToUnlink.push({ id: radioIdExisting, type: 'radios' });
-      radioToUse = radioIdNew;
+      radioToUse = radioIdNew; // pode ser null (desvincular sem substituto) ou um novo id
       if (radioIdNew) {
         const radioRef = doc(db, `artifacts/${appId}/public/data/radios`, radioIdNew);
         batch.update(radioRef, { status: 'Em Uso' });
@@ -1814,9 +1907,9 @@ async function handleVincularSubmit(equipamentoId, tipo, existingReg) {
       { newId: chipIdNew, existingId: chipIdExisting, field: 'chipId', type: 'bordos' }
     ];
     bordoFields.forEach(item => {
-      if (item.newId !== null && item.newId !== item.existingId) {
+      if (item.newId !== NOCHANGE && item.newId !== item.existingId) {
         if (item.existingId) itemsToUnlink.push({ id: item.existingId, type: 'bordos' });
-        if (item.field === 'telaId') telaToUse = item.newId;
+        if (item.field === 'telaId') telaToUse = item.newId; // pode ser null (desvincular) ou um novo id
         if (item.field === 'magId')  magToUse  = item.newId;
         if (item.field === 'chipId') chipToUse = item.newId;
         if (item.newId) {
@@ -1998,18 +2091,128 @@ async function deleteDuplicity(collectionName, id) {
         // Tenta excluir o documento
         await deleteDoc(doc(db, colPath, id));
 
-        showModal('Sucesso', 'Duplicidade removida com sucesso! A integridade dos dados será verificada novamente.', 'success');
-        
-        await refreshDataFromFirestore();
-        checkDuplicities(); 
+        await refreshDataFromFirestore(); // ja roda checkDuplicities() internamente
         renderApp();
-        hideDuplicityModal();
-        
+
+        // CORRECAO: NAO fecha mais o modal de duplicidades a cada exclusao.
+        // Antes disso, o modal fechava sozinho apos remover 1 item, entao quando o
+        // usuario reabria o sino de novo, parecia que "nada tinha sido excluido"
+        // (o grupo ainda aparecia, so que com uma copia a menos). Agora a lista e
+        // re-renderizada no proprio modal, que continua aberto.
+        renderDuplicityModalContent();
+        showModal('Sucesso', 'Duplicidade removida com sucesso!', 'success');
+
     } catch (error) {
         console.error("Erro ao excluir duplicidade:", error);
-        showModal('Erro', 'Ocorreu um erro ao excluir a duplicidade.', 'error');
+        showModal('Erro', 'Ocorreu um erro ao excluir a duplicidade. Verifique sua permissao de administrador.', 'error');
     }
 }
+
+/**
+ * NOVO: Sanitizacao em massa de duplicidades.
+ *
+ * Para cada grupo de duplicatas (mesma Serie/Frota/Tipo+Serie), mantem UM unico
+ * registro (o que estiver vinculado a uma Frota, se houver; senao o mais antigo
+ * pela data de criacao) e apaga todos os outros em lote. Itens vinculados nunca
+ * sao apagados - se por algum motivo mais de um item do mesmo grupo estiver
+ * vinculado (inconsistencia anterior), ambos sao mantidos e reportados para
+ * revisao manual.
+ */
+async function sanitizeDuplicities() {
+    if (!db || !appId) {
+        showModal('Erro', 'Conexao com o banco de dados perdida.', 'error');
+        return;
+    }
+    if (duplicities.length === 0) {
+        showModal('Aviso', 'Nao ha duplicidades para sanitizar.', 'info');
+        return;
+    }
+
+    const groups = duplicities.reduce((acc, item) => {
+        const key = `${item.collection}-${item.value}`;
+        if (!acc[key]) acc[key] = [];
+        acc[key].push(item);
+        return acc;
+    }, {});
+
+    const isItemLinked = (item) => {
+        if (item.collection === 'radios') return dbRegistros.some(reg => reg.radioId === item.id);
+        if (item.collection === 'equipamentos') return dbRegistros.some(reg => reg.equipamentoId === item.id);
+        if (item.collection === 'bordos') return dbRegistros.some(reg => reg.telaId === item.id || reg.magId === item.id || reg.chipId === item.id);
+        return false;
+    };
+
+    const idsToDelete = [];
+    let multiplosVinculadosCount = 0;
+
+    Object.values(groups).forEach(items => {
+        const linked = items.filter(isItemLinked);
+        let survivors;
+        if (linked.length === 1) {
+            survivors = [linked[0]];
+        } else if (linked.length > 1) {
+            // Inconsistencia rara: mais de um vinculado no mesmo grupo - mantem todos os vinculados, nao apaga nenhum deste grupo.
+            survivors = linked;
+            multiplosVinculadosCount++;
+        } else {
+            // Nenhum vinculado: mantem o registro mais antigo (primeiro cadastrado)
+            const sorted = [...items].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+            survivors = [sorted[0]];
+        }
+        const survivorIds = new Set(survivors.map(s => s.id));
+        items.forEach(item => {
+            if (!survivorIds.has(item.id)) idsToDelete.push(item);
+        });
+    });
+
+    if (idsToDelete.length === 0) {
+        showModal('Aviso', 'Nenhum registro pode ser removido automaticamente (todos os grupos possuem mais de um item vinculado). Revise manualmente.', 'warning');
+        return;
+    }
+
+    showConfirmModal(
+        'Confirmar Sanitizacao em Massa',
+        `Isso ira EXCLUIR PERMANENTEMENTE <b>${idsToDelete.length}</b> registro(s) duplicado(s), mantendo apenas 1 item por Serie/Frota/Tipo+Serie (priorizando o item vinculado a uma Frota, ou o mais antigo). Esta acao nao pode ser desfeita. Deseja continuar?`,
+        async () => {
+            try {
+                // Firestore permite no maximo 500 operacoes por batch - respeitamos 450 por seguranca.
+                let batch = writeBatch(db);
+                let opsInBatch = 0;
+                const batches = [];
+
+                idsToDelete.forEach(item => {
+                    const ref = doc(db, `artifacts/${appId}/public/data/${item.collection}`, item.id);
+                    batch.delete(ref);
+                    opsInBatch++;
+                    if (opsInBatch >= 450) {
+                        batches.push(batch);
+                        batch = writeBatch(db);
+                        opsInBatch = 0;
+                    }
+                });
+                if (opsInBatch > 0) batches.push(batch);
+
+                for (const b of batches) {
+                    await b.commit();
+                }
+
+                await refreshDataFromFirestore();
+                renderApp();
+
+                let msg = `${idsToDelete.length} registro(s) duplicado(s) removido(s) com sucesso!`;
+                if (multiplosVinculadosCount > 0) {
+                    msg += `<br><span class="text-yellow-600 dark:text-yellow-400">${multiplosVinculadosCount} grupo(s) tinham mais de um item vinculado e precisam de revisao manual.</span>`;
+                }
+                showModal('Sanitizacao Concluida', msg, 'success');
+                renderDuplicityModalContent();
+            } catch (error) {
+                console.error('Erro ao sanitizar duplicidades:', error);
+                showModal('Erro', 'Ocorreu um erro durante a sanitizacao em massa. Verifique sua permissao de administrador.', 'error');
+            }
+        }
+    );
+}
+window.sanitizeDuplicities = sanitizeDuplicities;
 
 
 // --- Funções de CRUD de Usuário (ATUALIZADO PARA CUSTOM LOGIN) ---
@@ -2458,6 +2661,15 @@ function renderDuplicityModalContent() {
     }, {});
     
     let html = '';
+
+    // 🌟 NOVO: Botão de sanitização em massa (mantém 1 registro por grupo, apaga o resto)
+    html += `
+        <div class="flex justify-end mb-3">
+            <button onclick="sanitizeDuplicities()" class="px-3 py-2 text-sm bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg shadow-md transition-colors flex items-center gap-2">
+                <i class="fas fa-broom"></i> Sanitizar Automaticamente (remover todas as duplicatas)
+            </button>
+        </div>
+    `;
 
     Object.values(groups).forEach(group => {
         // 🌟 ATUALIZADO: Inclui Bordos na label
@@ -5248,16 +5460,29 @@ function attachCadastroRadioEvents() {
             }
 
             const record = { id, serie, modelo, status };
-            
+            let precisaDesvincularSinistro = false;
+
             if (id) {
                 const existingRadio = dbRadios.find(r => r.id === id);
                 if (existingRadio && existingRadio.status === 'Em Uso' && status !== 'Em Uso') {
-                    record.status = 'Em Uso';	
-                    showModal('Aviso', 'O status "Em Uso" só pode ser alterado na aba "Geral" (pela desvinculação).', 'warning');
+                    if (status === 'Sinistro') {
+                        // 🌟 CORREÇÃO: Sinistro (perdido/queimado) desvincula automaticamente da Frota,
+                        // ao invés de bloquear a troca de status.
+                        precisaDesvincularSinistro = true;
+                    } else {
+                        record.status = 'Em Uso';	
+                        showModal('Aviso', 'O status "Em Uso" só pode ser alterado na aba "Geral" (pela desvinculação).', 'warning');
+                    }
                 }
             }
 
             await saveRecord('radios', record);	
+
+            if (precisaDesvincularSinistro) {
+                await autoUnlinkOnSinistro('radios', id);
+                await refreshDataFromFirestore();
+                showModal('Sucesso', 'Rádio marcado como Sinistro e desvinculado automaticamente da Frota.', 'success');
+            }
             
             form.reset();
             document.getElementById('radio-id').value = '';
@@ -5347,16 +5572,29 @@ function attachCadastroBordosEvents() {
             }
 
             const record = { id, tipo, numeroSerie, modelo, status };
-            
+            let precisaDesvincularSinistro = false;
+
             if (id) {
                 const existingBordo = dbBordos.find(b => b.id === id);
                 if (existingBordo && existingBordo.status === 'Em Uso' && status !== 'Em Uso') {
-                    record.status = 'Em Uso';	
-                    showModal('Aviso', 'O status "Em Uso" só pode ser alterado na aba "Geral" (pela desvinculação).', 'warning');
+                    if (status === 'Sinistro') {
+                        // 🌟 CORREÇÃO: Sinistro (perdido/queimado) desvincula automaticamente da Frota,
+                        // ao invés de bloquear a troca de status.
+                        precisaDesvincularSinistro = true;
+                    } else {
+                        record.status = 'Em Uso';	
+                        showModal('Aviso', 'O status "Em Uso" só pode ser alterado na aba "Geral" (pela desvinculação).', 'warning');
+                    }
                 }
             }
 
             await saveRecord('bordos', record);	
+
+            if (precisaDesvincularSinistro) {
+                await autoUnlinkOnSinistro('bordos', id);
+                await refreshDataFromFirestore();
+                showModal('Sucesso', `Bordo (${tipo}) marcado como Sinistro e desvinculado automaticamente da Frota.`, 'success');
+            }
             
             form.reset();
             document.getElementById('bordo-id').value = '';

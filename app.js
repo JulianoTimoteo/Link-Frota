@@ -3323,9 +3323,10 @@ function renderDashboard() {
     });
     
     // --- 5. Helper de Renderização de Card ---
-    const _renderStatCard = (title, value, iconClass, colorClass, details = null) => {
+    const _renderStatCard = (title, value, iconClass, colorClass, details = null, onclick = null) => {
+        const clickable = onclick ? ` onclick="${onclick}" style="cursor:pointer;" role="button"` : '';
         return `
-            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-4 border border-gray-200 dark:border-gray-700 futuristic-card">
+            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-4 border border-gray-200 dark:border-gray-700 futuristic-card"${clickable}>
                 <div class="flex items-center space-x-3">
                     <div class="p-2 rounded-full ${colorClass} text-white">
                         <i class="fas ${iconClass} fa-lg"></i>
@@ -3347,7 +3348,7 @@ function renderDashboard() {
         <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
             ${_renderStatCard('Total Rádios', totalRadios, 'fa-broadcast-tower', 'bg-blue-600')}
             ${_renderStatCard('Em Uso', radiosEmUso, 'fa-wifi', 'bg-green-main')}
-            ${_renderStatCard('Disponíveis', radiosDisponiveis, 'fa-check-circle', 'bg-sky-500')}
+            ${_renderStatCard('Disponíveis', radiosDisponiveis, 'fa-check-circle', 'bg-sky-500', null, 'showRadiosDisponiveis()')}
             ${_renderStatCard('Manutenção', radiosManutencao, 'fa-tools', 'bg-yellow-500')}
             ${_renderStatCard('Sinistro', radiosSinistro, 'fa-exclamation-triangle', 'bg-red-600')}
         </div>
@@ -6874,6 +6875,36 @@ window.fecharRadioAmadorModal = fecharRadioAmadorModal;
 window.radioModalBuscar = radioModalBuscar;
 window.exportarCadastroJSON = exportarCadastroJSON;
 window.handleSolicitarAcesso = handleSolicitarAcesso; 
+
+// Mini relatório de rádios disponíveis (Dashboard)
+function showRadiosDisponiveis() {
+    if (!dbRadios || dbRadios.length === 0) {
+        showModal('Rádios Disponíveis', 'Nenhum rádio disponível no momento.', 'info');
+        return;
+    }
+    const disponiveis = dbRadios.filter(r => r.ativo !== false && r.status === 'Disponível');
+    if (disponiveis.length === 0) {
+        showModal('Rádios Disponíveis', 'Nenhum rádio disponível no momento.', 'info');
+        return;
+    }
+    const modelCount = {};
+    disponiveis.forEach(r => {
+        const m = r.modelo || 'Sem modelo';
+        modelCount[m] = (modelCount[m] || 0) + 1;
+    });
+    const listHtml = Object.entries(modelCount)
+        .sort((a, b) => b[1] - a[1])
+        .map(([modelo, qtd]) =>
+            `<div class="flex justify-between items-center py-2 border-b border-gray-100 dark:border-gray-700 last:border-0">
+                <span class="text-gray-800 dark:text-gray-100 font-medium">${modelo}</span>
+                <span class="text-green-main font-bold text-lg">${qtd}</span>
+            </div>`
+        ).join('');
+    showModal(`Rádios Disponíveis (${disponiveis.length})`,
+        `<div class="space-y-1">${listHtml}</div>`, 'success');
+}
+window.showRadiosDisponiveis = showRadiosDisponiveis;
+
 window.showProfileModal = showProfileModal;
 window.hideProfileModal = hideProfileModal;
 window.getUserAvatar = getUserAvatar; // Expondo getUserAvatar

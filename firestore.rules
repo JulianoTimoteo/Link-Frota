@@ -25,6 +25,13 @@ service cloud.firestore {
         allow update, delete: if isAdmin();
       }
 
+      match /users/{email} {
+        allow read: if isAuthenticated();
+        allow create: if request.auth != null && email == request.auth.token.email;
+        allow update: if request.auth != null && email == request.auth.token.email;
+        allow delete: if isAdmin();
+      }
+
       match /{document=**} {
         allow read: if isAuthenticated();
         allow write: if isAdmin();

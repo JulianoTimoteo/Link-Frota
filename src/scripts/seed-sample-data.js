@@ -5,7 +5,7 @@ const FIREBASE_CONFIG = {
     apiKey: "AIzaSyCb0Dhh_eMHrs_Dyg1wS5nbMu1U6tKHa3A",
     authDomain: "gestaoradios-58b0a.firebaseapp.com",
     projectId: "gestaoradios-58b0a",
-    storageBucket: "gestaoradios-58b0a.firebaseapp.com",
+    storageBucket: "gestaoradios-58b0a.firebasestorage.app",
     messagingSenderId: "359260635463",
     appId: "1:359260635463:web:1c3ac47eebcd3434818c62",
     measurementId: "G-DVXXT79TZK"

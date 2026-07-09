@@ -36,7 +36,7 @@ const FIREBASE_CONFIG = {
     apiKey: "AIzaSyCb0Dhh_eMHrs_Dyg1wS5nbMu1U6tKHa3A",
     authDomain: "gestaoradios-58b0a.firebaseapp.com",
     projectId: "gestaoradios-58b0a",
-    storageBucket: "gestaoradios-58b0a.firebaseapp.com",
+    storageBucket: "gestaoradios-58b0a.firebasestorage.app",
     messagingSenderId: "359260635463",
     appId: "1:359260635463:web:1c3ac47eebcd3434818c62",
     measurementId: "G-DVXXT79TZK"
@@ -2373,9 +2373,11 @@ async function saveUser(e) {
             await setDoc(settingsDocRef, {
                 users: arrayUnion(userToSave)
             }, { merge: true });
-            
-            // Não precisamos dar push no settings.users aqui porque já fizemos lá em cima no objeto userToSave
         }
+
+        // Sincroniza com a coleção users/{email} para aparecer no Firebase Console
+        const userDocRef = doc(db, "artifacts", appId, "public", "data", "users", finalEmail);
+        await setDoc(userDocRef, userToSave);
 
         showModal('Sucesso', `Perfil de ${name} salvo com sucesso! Login ativo.`, 'success');
         renderApp();
@@ -2431,6 +2433,10 @@ async function deleteUser(id) {
         await updateDoc(settingsDocRef, {
             users: arrayRemove(userToDelete)
         });
+
+        // Remove também da coleção users/{email}
+        const userDocRef = doc(db, "artifacts", appId, "public", "data", "users", userUsername);
+        await deleteDoc(userDocRef);
 
         // Atualiza a memória local (só depois que o banco confirmou)
         settings.users = settings.users.filter(u => u.id !== id);
@@ -2492,7 +2498,11 @@ async function approveUser(pendingId, name, email, tempPassword) {
         batch.delete(pendingDocRef);
 
         await batch.commit();
-        
+
+        // Sincroniza com a coleção users/{email} para aparecer no Firebase Console
+        const userDocRef = doc(db, "artifacts", appId, "public", "data", "users", email);
+        await setDoc(userDocRef, newUser);
+
         // Atualiza a memória local (agora precisamos recarregar as settings)
         // A forma mais segura é forçar um reload das settings locais:
         await loadInitialSettings(); 
@@ -3273,8 +3283,9 @@ function renderDashboard() {
 
     // --- 2. Cálculos de Bordos (Continuação) ---
     
-    // "Total Kits Bordo" (Total de kits completos que a empresa possui)
-    const totalBordos = Math.min(bordoStats.Tela.Total, bordoStats.Mag.Total, bordoStats.Chip.Total);
+    // "Total Componentes" (Total de itens individuais: Tela + Mag + Chip)
+    const totalBordos = activeBordos.length;
+    const totalKits = Math.min(bordoStats.Tela.Total, bordoStats.Mag.Total, bordoStats.Chip.Total);
     
     // 🌟 CORREÇÃO: "Kits em Uso" (Total de kits completos instalados)
     // Conta quantos registros de vínculo possuem os 3 itens de bordo.
@@ -3428,7 +3439,7 @@ function renderDashboard() {
                 <div class="bg-white dark:bg-gray-800 rounded-xl shadow-xl p-6 border border-gray-200 dark:border-gray-700 futuristic-card">
                    <h3 class="text-xl font-semibold text-gray-800 dark:text-gray-100 mb-4 flex items-center">
     <i class="fas fa-microchip mr-2 text-blue-500"></i>	
-    Resumo de Componentes de Bordo -Total Kits: ${totalBordos}
+    Resumo de Componentes de Bordo -Total Itens: ${totalBordos}
 </h3>
                     <div class="overflow-x-auto">
                         <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
@@ -3486,9 +3497,9 @@ function renderDashboard() {
                     </h3>
                     <div class="space-y-3">
                         ${[
-                            { label: 'Total Kits', value: totalBordos, color: 'bg-blue-500', max: totalBordos || 1 },
-                            { label: 'Kits em Uso', value: bordosEmUso, color: 'bg-green-500', max: totalBordos || 1 },
-                            { label: 'Kits Disponíveis', value: kitsDisponiveis, color: 'bg-sky-400', max: totalBordos || 1 }
+                            { label: 'Total Kits', value: totalKits, color: 'bg-blue-500', max: totalKits || 1 },
+                            { label: 'Kits em Uso', value: bordosEmUso, color: 'bg-green-500', max: totalKits || 1 },
+                            { label: 'Kits Disponíveis', value: kitsDisponiveis, color: 'bg-sky-400', max: totalKits || 1 }
                         ].map(item => `
                             <div>
                                 <div class="flex justify-between text-sm mb-1">
@@ -5029,11 +5040,31 @@ function attachSettingsUsersEvents() {
 
 // Função de renderização de Usuários com Formulário de CRUD
 async function renderSettingsUsers() {
-    // Recarrega lista de usuários (para garantir dados frescos para a renderização)
     const settingsDocRef = doc(db, "artifacts", appId, "public", "data", "settings", "config");
     const settingsSnap = await getDoc(settingsDocRef);
-    const usersFromDB = settingsSnap.exists() ? settingsSnap.data().users || [] : [];
-    settings.users = usersFromDB;		
+    let usersFromDB = settingsSnap.exists() ? settingsSnap.data().users || [] : [];
+
+    // Também busca perfis da coleção users (criados pela recuperação automática)
+    try {
+        const usersColRef = collection(db, "artifacts", appId, "public", "data", "users");
+        const usersSnap = await getDocs(usersColRef);
+        usersSnap.forEach(docSnap => {
+            const u = docSnap.data();
+            if (!usersFromDB.some(ex => ex.username === docSnap.id)) {
+                usersFromDB.push({
+                    id: u.id || docSnap.id,
+                    name: u.name || docSnap.id.split('@')[0],
+                    username: docSnap.id,
+                    role: u.role || 'user',
+                    permissions: u.permissions || { dashboard: true, cadastro: true, pesquisa: true, settings: false }
+                });
+            }
+        });
+    } catch (e) {
+        console.warn("Erro ao ler users:", e);
+    }
+
+    settings.users = usersFromDB;
 
     const tableRows = usersFromDB.map(u => {
         const isMainAdmin = u.username === ADMIN_PRINCIPAL_EMAIL;
@@ -6205,87 +6236,130 @@ const MIN_SPLASH_TIME = 2000;
 let splashStart = 0;
 
 function setupAuthListener() {
-    // Carrega cache offline antes de qualquer requisição à rede
     loadDataCache();
 
-    // [NOVO] Carrega as configurações antes de checar o estado de autenticação para ter a lista de usuários
-    loadInitialSettings().then(() => {
-        onAuthStateChanged(auth, async (user) => {
-            if (user) {
-                // 🌟 INÍCIO DO SPLASH SCREEN
-                splashStart = Date.now();
-                isLoggingIn = true; // Mantém a flag ligada durante o carregamento dos dados
-                renderApp();
+    onAuthStateChanged(auth, async (user) => {
+        if (user) {
+            splashStart = Date.now();
+            isLoggingIn = true;
+            renderApp();
+            userId = user.uid;
 
-                userId = user.uid;
-                // Usa a lista de settings.users que já foi pré-carregada
-                let appUser = settings.users.find(u => u.username === user.email);
-                
-                // [SOLUÇÃO DE CONTINGÊNCIA] Se for o Admin principal, forçamos a criação/uso do perfil Admin.
-                if (!appUser && user.email === ADMIN_PRINCIPAL_EMAIL) {
-                    appUser = { 
-                        id: user.uid, 
-                        name: "Juliano Timoteo (Admin Principal)", 
-                        username: ADMIN_PRINCIPAL_EMAIL, 
-                        role: "admin",
-                        permissions: { dashboard: true, cadastro: true, pesquisa: true, settings: true }
-                    };
-                    // Adiciona o perfil à lista em memória e tenta salvar 
-                    if (!settings.users.some(u => u.username === ADMIN_PRINCIPAL_EMAIL)) {
-                        settings.users.push(appUser);
-                        saveSettings();
+            await loadInitialSettings();
+
+            let appUser = settings.users.find(u => u.username === user.email);
+
+            // Leitura fresca direto do Firestore (caso loadInitialSettings tenha dados desatualizados)
+            if (!appUser) {
+                try {
+                    const settingsDocRef = doc(db, "artifacts", appId, "public", "data", "settings", "config");
+                    const freshSnap = await getDoc(settingsDocRef);
+                    if (freshSnap.exists()) {
+                        const freshUsers = freshSnap.data().users || [];
+                        settings.users = freshUsers;
+                        appUser = freshUsers.find(u => u.username === user.email);
                     }
+                } catch (e) {
+                    console.error("Leitura fresca de settings falhou:", e);
                 }
+            }
 
-                if (appUser) {
-                    // Usuário aprovado no Firestore, loga no App.
-                    // Adiciona o customUsername ao objeto currentUser para uso no App
-                    currentUser = { ...appUser, uid: user.uid, email: user.email, customUsername: appUser.customUsername || null };
-                    isAuthReady = true;
-                    // isLoggingIn é desligado após o delay
+            // Contingência Admin Principal
+            if (!appUser && user.email === ADMIN_PRINCIPAL_EMAIL) {
+                appUser = {
+                    id: user.uid,
+                    name: "Juliano Timoteo (Admin Principal)",
+                    username: ADMIN_PRINCIPAL_EMAIL,
+                    role: "admin",
+                    permissions: { dashboard: true, cadastro: true, pesquisa: true, settings: true }
+                };
+                if (!settings.users.some(u => u.username === ADMIN_PRINCIPAL_EMAIL)) {
+                    settings.users.push(appUser);
+                    saveSettings();
+                }
+            }
 
-                    await attachFirestoreListeners();	
-
-                    // 🌟 FIM DO SPLASH SCREEN APÓS O DELAY
-                    const elapsed = Date.now() - splashStart;
-                    const delay = Math.max(0, MIN_SPLASH_TIME - elapsed);
-                    
-                    setTimeout(() => {
-                        isLoggingIn = false;
-                        renderApp();
-                        
-                        // 🛑 NOVO: Dispara a caixa de diálogo customizada após o login, se o prompt foi capturado.
-                        if (deferredPrompt) {
-                            showInstallDialog();
+            // RECUPERAÇÃO: verifica na coleção users se o usuário tem perfil próprio
+            if (!appUser) {
+                try {
+                    const userDocRef = doc(db, "artifacts", appId, "public", "data", "users", user.email);
+                    const userSnap = await getDoc(userDocRef);
+                    if (userSnap.exists()) {
+                        const userData = userSnap.data();
+                        appUser = {
+                            id: userData.id || user.uid,
+                            name: userData.name || user.email.split('@')[0],
+                            username: user.email,
+                            role: userData.role || 'user',
+                            permissions: userData.permissions || { dashboard: true, cadastro: true, pesquisa: true, settings: false }
+                        };
+                        if (!settings.users.some(u => u.username === user.email)) {
+                            settings.users.push(appUser);
                         }
-
-                    }, delay);
-                } else {
-                    // Usuário autenticado, mas sem perfil no Firestore (não aprovado).
-                    if (user.email) {
-                        showModal('Acesso Não Autorizado', `Seu perfil (${user.email}) foi autenticado, mas não possui acesso aprovado no sistema. Contate um administrador.`, 'error');
-                    } else {
-                        showModal('Erro', 'Falha na autenticação do perfil de acesso. Contate o suporte.', 'error');
+                        console.log("Perfil recuperado de users para:", user.email);
                     }
-                    
-                    if (auth.currentUser) await signOut(auth); // Desloga o usuário
-                    
-                    isAuthReady = true;	
-                    isLoggingIn = false;
-                    updateState('page', 'login');
+                } catch (e) {
+                    console.error("Leitura de users falhou:", e);
                 }
+            }
+
+            // CRIAÇÃO: se não encontrou em nenhum lugar, tenta criar na coleção users
+            if (!appUser) {
+                try {
+                    const newUser = {
+                        id: crypto.randomUUID(),
+                        name: user.email.split('@')[0] || user.email,
+                        username: user.email,
+                        role: 'user',
+                        permissions: { dashboard: true, cadastro: true, pesquisa: true, settings: false }
+                    };
+                    const userDocRef = doc(db, "artifacts", appId, "public", "data", "users", user.email);
+                    await setDoc(userDocRef, newUser);
+                    settings.users.push(newUser);
+                    appUser = newUser;
+                    console.log("Perfil auto-criado em users para:", user.email);
+                } catch (e) {
+                    console.error("Falha ao criar perfil em users:", e);
+                }
+            }
+
+            if (appUser) {
+                currentUser = { ...appUser, uid: user.uid, email: user.email, customUsername: appUser.customUsername || null };
+                isAuthReady = true;
+
+                await attachFirestoreListeners();
+
+                const elapsed = Date.now() - splashStart;
+                const delay = Math.max(0, MIN_SPLASH_TIME - elapsed);
+
+                setTimeout(() => {
+                    isLoggingIn = false;
+                    renderApp();
+                    if (deferredPrompt) {
+                        showInstallDialog();
+                    }
+                }, delay);
             } else {
-                currentUser = null;
-                userId = null;
+                if (user.email) {
+                    showModal('Acesso Não Autorizado', `Seu perfil (${user.email}) foi autenticado, mas não possui acesso aprovado no sistema. Contate um administrador.`, 'error');
+                } else {
+                    showModal('Erro', 'Falha na autenticação do perfil de acesso. Contate o suporte.', 'error');
+                }
+                if (auth.currentUser) await signOut(auth);
                 isAuthReady = true;
                 isLoggingIn = false;
-                detachFirestoreListeners();	
-                dbRadios = []; dbEquipamentos = []; dbBordos = []; dbRegistros = []; // 🌟 ATUALIZADO: Limpa Bordos
-                // Volta para a tela de login principal por padrão
-                updateState('loginView', 'login'); 
-                renderApp();	
+                updateState('page', 'login');
             }
-        });
+        } else {
+            currentUser = null;
+            userId = null;
+            isAuthReady = true;
+            isLoggingIn = false;
+            detachFirestoreListeners();
+            dbRadios = []; dbEquipamentos = []; dbBordos = []; dbRegistros = [];
+            updateState('loginView', 'login');
+            renderApp();
+        }
     });
 }
 

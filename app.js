@@ -5789,6 +5789,7 @@ function attachCadastroGeralEvents() {
 
                         if (isLinked) {
                             submitBtn.disabled = true;
+                            submitBtn.dataset.frotaLocked = 'true';
                             submitBtn.textContent = 'Frota já em uso (Gerencie abaixo)';
                             submitBtn.classList.add('bg-gray-400', 'hover:bg-gray-400');
                             submitBtn.classList.remove('bg-green-main', 'hover:bg-green-700');
@@ -5800,6 +5801,7 @@ function attachCadastroGeralEvents() {
                             showModal('Aviso', 'Esta Frota já possui vínculos ativos. Por favor, use os botões na tabela abaixo para gerenciar (Desvincular/Vincular).', 'warning');
                         } else {
                             submitBtn.disabled = false;
+                            submitBtn.dataset.frotaLocked = 'false';
                             submitBtn.textContent = 'Criar Novo Vínculo';
                             submitBtn.classList.remove('bg-gray-400', 'hover:bg-gray-400');
                             submitBtn.classList.add('bg-green-main', 'hover:bg-green-700');
@@ -5832,8 +5834,8 @@ function attachCadastroGeralEvents() {
         const selectedBordos = bordoSelects.filter(s => s.value).length;
         const submitBtn = document.querySelector('#form-geral button[type="submit"]');
         
-        // Se a frota já estiver em uso, a validação de obrigatoriedade não se aplica (o botão de submit está desabilitado)
-        if (submitBtn.disabled) return;
+        // Se a frota já estiver em uso, a validação de obrigatoriedade não se aplica (o botão fica travado por essa razão específica)
+        if (submitBtn.dataset.frotaLocked === 'true') return;
 
         // Regra: Se 1 ou 2 bordos são selecionados, não pode submeter
         if (selectedBordos > 0 && selectedBordos < 3) {
@@ -5908,11 +5910,11 @@ function attachCadastroGeralEvents() {
             const allLinkedItems = [radioId, telaId, magId, chipId].filter(id => id);
             for(const itemId of allLinkedItems) {
                  const isRadio = radioId === itemId;
+                 const item = isRadio ? dbRadios.find(r => r.id === itemId) : dbBordos.find(b => b.id === itemId);
                  const isLinked = dbRegistros.some(reg => 
                      reg.radioId === itemId || reg.telaId === itemId || reg.magId === itemId || reg.chipId === itemId
                  );
                  if (isLinked) {
-                     const item = isRadio ? dbRadios.find(r => r.id === itemId) : dbBordos.find(b => b.id === itemId);
                      const itemType = isRadio ? 'Rádio' : item.tipo;
                      showModal('Item Já Vinculado', `${itemType} ${item.serie || item.numeroSerie} já está em uso em outra Frota. Desvincule-o primeiro.`, 'error');
                      return;
